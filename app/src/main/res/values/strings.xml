@@ -171,6 +171,17 @@
     <string name="key_screen_capture_request_delay" translatable="false">key_$_screen_capture_request_delay_ms</string>
     <string name="key_scripts_after_app_restart" translatable="false">key_$_scripts_after_app_restart</string>
     <string name="key_server_address" translatable="false">key_$_server_address</string>
+
+    <!-- @mgmt-hook H8: 管理平台薄层 (org.autojs.autojs.mgmt), key 字面值与 6.6.x 定制版保持一致。 -->
+    <string name="key_management_platform_server_address" translatable="false">key_$_management_platform_server_address</string>
+    <string name="key_management_platform_secret" translatable="false">key_$_management_platform_secret</string>
+    <string name="key_management_platform_test_connection" translatable="false">key_$_management_platform_test_connection</string>
+    <string name="text_management_platform_server_address">Management platform server address</string>
+    <string name="text_management_platform_secret">Management platform secret</string>
+    <string name="text_management_platform_test_connection">Test connection to management platform</string>
+    <string name="text_management_platform_connected">Connected to platform</string>
+    <string name="text_management_platform_connection_success">Connection to management platform succeeded</string>
+    <string name="text_management_platform_connection_failed">Connection to management platform failed: %1$s</string>
     <string name="key_server_socket_normally_closed" translatable="false">key_$_server_socket_normally_closed</string>
     <string name="key_stable_mode" translatable="false">key_$_stable_mode</string>
     <string name="key_theme_color" translatable="false">key_$_theme_color</string>

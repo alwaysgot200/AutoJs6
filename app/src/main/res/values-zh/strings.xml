@@ -1427,6 +1427,13 @@
     <string name="text_writing_resources_arsc">正在写入 resources.arsc</string>
     <string name="text_writing_signed_apk">正在写入已签名 APK</string>
     <string name="text_xiaomi_background_popup_permission">后台弹出界面</string>
+    <!-- @mgmt-hook H8: 管理平台薄层 (org.autojs.autojs.mgmt) 中文文案。 -->
+    <string name="text_management_platform_server_address">管理平台服务器地址</string>
+    <string name="text_management_platform_secret">管理平台秘钥</string>
+    <string name="text_management_platform_test_connection">测试连接管理平台</string>
+    <string name="text_management_platform_connected">已连接到平台</string>
+    <string name="text_management_platform_connection_success">成功连接到管理平台</string>
+    <string name="text_management_platform_connection_failed">连接管理平台失败: %1$s</string>
     <string name="warn_continue_operation_without_saving_settings">设置尚未保存, 确定要继续操作吗</string>
     <string name="warn_exit_without_saving_settings">设置尚未保存, 确定要退出吗</string>
 </resources>
