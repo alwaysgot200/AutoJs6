@@ -540,6 +540,21 @@
                         android:textAppearance="@style/TextAppearance.AppCompat.Body2"
                         android:textColor="?android:textColorSecondary" />
 
+                    <!-- @custom C2: 一键勾选群控常用权限 (与接入服务实际需要的权限对齐)。 -->
+                    <TextView
+                        android:id="@+id/quick_select_permissions"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="16dp"
+                        android:layout_marginBottom="12dp"
+                        android:background="?selectableItemBackground"
+                        android:clickable="true"
+                        android:focusable="true"
+                        android:text="@string/text_quick_select_common_permissions"
+                        android:textColor="@color/colorPrimary"
+                        android:textSize="16sp"
+                        android:textStyle="bold" />
+
                     <com.google.android.flexbox.FlexboxLayout
                         android:id="@+id/flexbox_permissions"
                         android:layout_width="wrap_content"

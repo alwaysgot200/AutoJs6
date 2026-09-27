@@ -182,6 +182,10 @@
     <string name="text_management_platform_connected">Connected to platform</string>
     <string name="text_management_platform_connection_success">Connection to management platform succeeded</string>
     <string name="text_management_platform_connection_failed">Connection to management platform failed: %1$s</string>
+    <!-- @custom C1/C2: 二开作者信息入口 + 打包页一键勾选常用权限 (与 6.6.x 定制版字面值一致)。 -->
+    <string name="url_bilibili_qianruohongchen" translatable="false">https://space.bilibili.com/519965290</string>
+    <string name="text_author_qianruohongchen" translatable="false">浅若红尘（哔哩哔哩博主）</string>
+    <string name="text_quick_select_common_permissions" translatable="false">一键勾选常用权限</string>
     <string name="key_server_socket_normally_closed" translatable="false">key_$_server_socket_normally_closed</string>
     <string name="key_stable_mode" translatable="false">key_$_stable_mode</string>
     <string name="key_theme_color" translatable="false">key_$_theme_color</string>

@@ -64,6 +64,14 @@ open class AboutActivity : BaseActivity() {
         activityBinding.iconAboutApp.setOnClickListener { showDeviceInfo() }
         activityBinding.iconAboutApp.setOnLongClickListener { true.also { launchDeveloperOptions() } }
 
+        // @custom C1: 二开作者信息入口 (浅若红尘 B 站主页; layout-land 变体无此控件故安全调用)。
+        activityBinding.authorQianruohongchen?.setOnClickListener {
+            Intent(Intent.ACTION_VIEW)
+                .setData(getString(R.string.url_bilibili_qianruohongchen).toUri())
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                .let { startActivity(it) }
+        }
+
         functionsButtonsBinding.aboutFunctionsButtonLicenses.setOnClickListener { showLicensesDialog() }
         functionsButtonsBinding.aboutFunctionsButtonUpdate.setOnClickListener { checkForUpdates() }
         functionsButtonsBinding.aboutFunctionsButtonReleaseHistory.setOnClickListener { showReleaseHistory() }

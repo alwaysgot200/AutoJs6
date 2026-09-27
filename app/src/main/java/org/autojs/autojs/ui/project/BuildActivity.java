@@ -164,6 +164,19 @@ public class BuildActivity extends BaseActivity implements ApkBuilder.ProgressCa
         put("termux", "com.termux.permission.RUN_COMMAND");
     }};
 
+    // @custom C2: 管理平台接入场景的常用权限集合, 供"一键勾选"使用。
+    private static final List<String> COMMON_PERMISSIONS = List.of(
+            "android.permission.INTERNET",
+            "android.permission.ACCESS_NETWORK_STATE",
+            "android.permission.ACCESS_WIFI_STATE",
+            "android.permission.WAKE_LOCK",
+            "android.permission.RECEIVE_BOOT_COMPLETED",
+            "android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS",
+            "android.permission.SYSTEM_ALERT_WINDOW",
+            "android.permission.POST_NOTIFICATIONS",
+            "android.permission.FOREGROUND_SERVICE"
+    );
+
     private final Map<String, Integer> SUPPORTED_PERMISSIONS = new TreeMap<>() {{
         put("android.permission.ACCESS_COARSE_LOCATION", R.string.text_permission_desc_access_coarse_location);
         put("android.permission.ACCESS_FINE_LOCATION", R.string.text_permission_desc_access_fine_location);
@@ -433,6 +446,8 @@ public class BuildActivity extends BaseActivity implements ApkBuilder.ProgressCa
         mSignatureSchemesView = binding.spinnerSignatureSchemes;
         mVerifiedKeyStoresView = binding.spinnerVerifiedKeyStores;
         mFlexboxPermissionsView = binding.flexboxPermissions;
+        // @custom C2: 一键勾选常用权限。
+        binding.quickSelectPermissions.setOnClickListener(v -> quickCheckPermissions(COMMON_PERMISSIONS));
 
         mBuildProfileSpinner = binding.buildProfileSpinner;
         mIvBuildProfileNew = binding.ivBuildProfileNew;
@@ -1931,6 +1946,29 @@ public class BuildActivity extends BaseActivity implements ApkBuilder.ProgressCa
             }
             return false;
         });
+    }
+
+    // @custom C2: 按权限名字面量勾选 flexbox 中对应复选框 (条目文本首行即权限名)。
+    private void quickCheckPermissions(List<String> permissionsToCheck) {
+        IntStream.range(0, mFlexboxPermissionsView.getChildCount())
+                .mapToObj(i -> mFlexboxPermissionsView.getChildAt(i))
+                .forEach(child -> {
+                    CharSequence viewCharSequence = child instanceof RoundCheckboxWithText
+                            ? ((RoundCheckboxWithText) child).getText()
+                            : child instanceof CheckBox ? ((CheckBox) child).getText() : null;
+                    if (viewCharSequence == null) {
+                        return;
+                    }
+                    String viewText = viewCharSequence.toString().split("\n")[0].trim();
+                    if (!permissionsToCheck.contains(viewText)) {
+                        return;
+                    }
+                    if (child instanceof RoundCheckboxWithText) {
+                        ((RoundCheckboxWithText) child).setChecked(true);
+                    } else {
+                        ((CheckBox) child).setChecked(true);
+                    }
+                });
     }
 
     private boolean isAliasMatching(Map<String, List<String>> aliases, String aliasKey, List<String> candidates) {

@@ -301,6 +301,20 @@
                 android:orientation="vertical"
                 android:gravity="center">
 
+                <!-- @custom C1: 二开作者信息入口 (浅若红尘 B 站主页, 横屏)。 -->
+                <TextView
+                    android:id="@+id/author_qianruohongchen"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center"
+                    android:layout_marginBottom="8dp"
+                    android:background="?selectableItemBackground"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:text="@string/text_author_qianruohongchen"
+                    android:textColor="@color/github_color_fg_default"
+                    android:textSize="@dimen/github_font_size_full_name" />
+
                 <include
                     android:id="@+id/activity_about_function_buttons"
                     layout="@layout/activity_about_function_buttons"

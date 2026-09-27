@@ -24,6 +24,17 @@ public class ErrorDialogActivity extends BaseActivity {
     public static final String EXTRA_MESSAGE = "message";
     public static final String EXTRA_POSITIVE_BUTTON_TEXT = "positive_button_text";
 
+    // @custom C3: 透明崩溃弹窗不参与导航栏对比色/内容区横移处理, 避免半透明背景异常。
+    @Override
+    public boolean getHandleNavigationBarContrastEnforcedAutomatically() {
+        return false;
+    }
+
+    @Override
+    public boolean getHandleContentViewFromHorizontalNavigationBarAutomatically() {
+        return false;
+    }
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
