@@ -73,12 +73,16 @@
         android:layout_height="400dp"
         android:paddingStart="4dp">
 
+        <!-- @vendor-fix V1: 上游 ed3eb10e (PR#502 49ea44ec) 引用了全树未定义的
+             @color/console_debug 与 @color/console_verbose, 导致原版构建 aapt2 链接失败。
+             色值对齐官方 activity_main_inrt.xml (#111214 / #BDBDBD),
+             即既有 console_view_debug / console_view_verbose。 -->
         <org.autojs.autojs.core.console.ConsoleView
             android:id="@+id/console"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            app:color_debug="@color/console_debug"
-            app:color_verbose="@color/console_verbose"/>
+            app:color_debug="@color/console_view_debug"
+            app:color_verbose="@color/console_view_verbose"/>
 
     </FrameLayout>
 
