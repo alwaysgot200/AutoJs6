@@ -27,6 +27,7 @@ import org.autojs.autojs.event.GlobalKeyObserver
 import org.autojs.autojs.external.receiver.DynamicBroadcastReceivers
 import org.autojs.autojs.ipc.InAppEventBus
 import org.autojs.autojs.leakcanary.LeakCanarySetup
+import org.autojs.autojs.mgmt.Mgmt
 import org.autojs.autojs.storage.file.TmpScriptFilesCleanupScheduler
 import org.autojs.autojs.storage.history.HistoryCleanupScheduler
 import org.autojs.autojs.theme.ThemeColorManager
@@ -81,6 +82,9 @@ class App : MultiDexApplication() {
 
                 ThemeColorManager.init()
                 setUpDefaultNightMode()
+
+                // @mgmt-hook H2: 管理平台薄层启动引导 (注册权限申请 + 拉起连接前台服务)。
+                Mgmt.bootstrap(this)
 
                 HistoryCleanupScheduler.scheduleStartupCleanup(this)
                 HistoryCleanupScheduler.schedulePeriodicCleanup(this)

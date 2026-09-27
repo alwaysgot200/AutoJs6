@@ -8,6 +8,7 @@ import android.util.Log;
 
 import org.autojs.autojs.AutoJs;
 import org.autojs.autojs.execution.ExecutionConfig;
+import org.autojs.autojs.mgmt.Mgmt;
 import org.autojs.autojs.model.script.ScriptFile;
 import org.autojs.autojs.timing.IntentTask;
 import org.autojs.autojs.timing.TimedTaskManager;
@@ -26,6 +27,12 @@ public class BaseBroadcastReceiver extends BroadcastReceiver {
     @SuppressLint("CheckResult")
     public void onReceive(Context context, Intent intent) {
         Log.d(LOG_TAG, "onReceive: intent = " + intent + ", this = " + this);
+        // @mgmt-hook H5: 开机/系统广播唤起时确保管理平台连接 (配置不完整时内部直接返回)。
+        try {
+            Mgmt.connectIfConfigured();
+        } catch (Throwable t) {
+            Log.w(LOG_TAG, "Failed to ensure management platform connection from broadcast", t);
+        }
         try {
             TimedTaskManager.getIntentTaskOfAction(intent.getAction())
                     .subscribeOn(Schedulers.io())

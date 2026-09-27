@@ -193,6 +193,22 @@
             app:title="@string/text_screen_capture_request_delay"
             app:longClickPrompt="@string/description_screen_capture_request_delay" />
 
+        <!-- @mgmt-hook H7: 管理平台薄层设置入口 (地址 / 秘钥 / 测试连接)。 -->
+        <org.autojs.autojs.mgmt.ui.ManagementPlatformServerAddressPreference
+            app:layout="@layout/preference_custom"
+            app:key="@string/key_management_platform_server_address"
+            app:title="@string/text_management_platform_server_address" />
+
+        <org.autojs.autojs.mgmt.ui.ManagementPlatformSecretPreference
+            app:layout="@layout/preference_custom"
+            app:key="@string/key_management_platform_secret"
+            app:title="@string/text_management_platform_secret" />
+
+        <org.autojs.autojs.mgmt.ui.ManagementPlatformTestConnectionPreference
+            app:layout="@layout/preference_custom"
+            app:key="@string/key_management_platform_test_connection"
+            app:title="@string/text_management_platform_test_connection" />
+
     </org.autojs.autojs.theme.preference.ThemeColorPreferenceCategory>
 
     <org.autojs.autojs.theme.preference.ThemeColorPreferenceCategory

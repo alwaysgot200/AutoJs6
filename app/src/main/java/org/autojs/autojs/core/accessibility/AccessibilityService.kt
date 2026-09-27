@@ -11,6 +11,7 @@ import org.autojs.autojs.core.accessibility.SimpleActionAutomator.Companion.Acce
 import org.autojs.autojs.core.automator.AccessibilityEventWrapper
 import org.autojs.autojs.core.pref.Language
 import org.autojs.autojs.event.EventDispatcher
+import org.autojs.autojs.mgmt.Mgmt
 import org.autojs.autojs.ui.main.drawer.DrawerFragment.Companion.Event.AccessibilityServiceStateChangedEvent
 import org.greenrobot.eventbus.EventBus
 import java.util.*
@@ -158,6 +159,8 @@ open class AccessibilityService : android.accessibilityservice.AccessibilityServ
         mEventExecutor?.shutdownNow()
         callback?.onDisconnected()
         EventBus.getDefault().post(object : AccessibilityServiceStateChangedEvent {})
+        // @mgmt-hook H4: 通知管理平台能力变化 (即时回推 CAPABILITIES 并尝试 root 自愈)。
+        Mgmt.onAccessibilityStateChanged()
 
         super.onDestroy()
     }
@@ -168,6 +171,8 @@ open class AccessibilityService : android.accessibilityservice.AccessibilityServ
         instance = this
         callback?.onConnected()
         EventBus.getDefault().post(object : AccessibilityServiceStateChangedEvent {})
+        // @mgmt-hook H4: 无障碍已就绪, 即时回推 CAPABILITIES。
+        Mgmt.onAccessibilityStateChanged()
         LOCK.lock()
         ENABLED.signalAll()
         LOCK.unlock()

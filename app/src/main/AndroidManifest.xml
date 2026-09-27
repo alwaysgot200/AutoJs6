@@ -100,6 +100,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <!-- @mgmt-hook H1: 管理平台薄层前台服务 (Android 14+ 需按类型声明)。 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 
     <uses-permission
         android:name="android.permission.UNLIMITED_TOASTS"
@@ -421,6 +423,12 @@
         </service>
 
         <service android:name="org.autojs.autojs.external.ScriptExecutionIntentService" />
+
+        <!-- @mgmt-hook H1: 管理平台薄层前台服务 (仅应用内部启停, dataSync 长连接)。 -->
+        <service
+            android:name="org.autojs.autojs.mgmt.service.ManagementPlatformService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
 
         <activity android:name="org.autojs.autojs.external.tasker.TaskPrefEditActivity" />
 

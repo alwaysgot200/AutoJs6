@@ -31,6 +31,7 @@ import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 import org.autojs.autojs.inrt.autojs.AutoJs as AutoJsInrt
+import org.autojs.autojs.mgmt.Mgmt
 
 /**
  * Created by Stardust on Apr 2, 2017.
@@ -63,6 +64,8 @@ open class AutoJs(appContext: Application) : AbstractAutoJs(appContext) {
 
     init {
         scriptEngineService.registerGlobalScriptExecutionListener(ScriptExecutionGlobalListener())
+        // @mgmt-hook H3: 注册管理平台脚本运行态监听器。
+        Mgmt.onEngineReady(scriptEngineService)
 
         // @Archived by SuperMonster003 on Sep 27, 2025.
         //  ! LocalBroadcastManager is deprecated.
