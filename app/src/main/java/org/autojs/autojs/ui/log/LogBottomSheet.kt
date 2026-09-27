@@ -79,8 +79,12 @@ class LogBottomSheet : BottomSheetDialogFragment() {
         }
 
         // Setup ConsoleView with global console
-        val autoJs = AutoJs.getInstance()
-        if (autoJs != null) {
+        // @vendor-fix V2: 上游 PR#502(49ea44ec) 在 Kotlin 中调用 AutoJs.getInstance(),
+        // 但 ed3 的 instance 为 companion @JvmStatic lateinit 属性, Kotlin 须用 AutoJs.instance
+        // (getInstance() 仅合成给 Java 调用方)。
+        val autoJs = AutoJs.instance
+        run {
+
             binding.console.setConsole(autoJs.globalConsole)
             
             // Hide input container (not needed in bottom sheet)
@@ -98,7 +102,8 @@ class LogBottomSheet : BottomSheetDialogFragment() {
 
         // Clear button
         binding.btnClear.setOnClickListener {
-            AutoJs.getInstance()?.globalConsole?.clear()
+            // @vendor-fix V2: 同上行, Kotlin 使用 AutoJs.instance。
+            AutoJs.instance.globalConsole.clear()
         }
 
         // Open full log activity button
