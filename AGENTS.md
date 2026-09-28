@@ -19,8 +19,10 @@
 | `mgmt` 分支 | vendor + 全部定制 | **唯一日常开发分支**，所有改动在此提交 |
 | `master` | fork 默认分支（=基线） | 不在此开发 |
 
-- **【强制】** 客户端开发与构建只在本仓 `mgmt` 分支进行；业务仓（`d:\autojs6_Management`）
-  通过 `git subtree --prefix=AutoJs6-master` 只读消费本分支，**禁止**在业务仓里改本工程文件。
+- **【强制】** 客户端开发与构建只在本仓 `mgmt` 分支进行；业务仓（`d:\work\autojs6_Management`）
+  以 **git submodule**（path `AutoJs6-master`，跟踪本仓 `mgmt` 分支）消费本分支，
+  **禁止**在业务仓里直接修改本工程文件——客户端改动一律先在本仓 `mgmt` 分支提交推送，
+  再到业务仓执行 `git submodule update --remote AutoJs6-master` 更新并提交新指针。
 - **【强制】** 提交前缀分层，禁止混提：`mgmt:`（薄层/挂钩/本仓文档）、`custom:`（与管理平台
   无关的小定制）、`vendor:fix:`（官方缺陷修补）、`vendor:build:`（构建链定点修补）。
 
@@ -152,7 +154,7 @@ MainActivity (ui/main/MainActivity.kt)                主界面，mgmt 零修改
    保上游主体、按 `@mgmt-hook` 把一行委托挂回原语义位置；`vendor:fix` 若上游已修则删补丁；
 4. 双 flavor 构建：`assembleAppDebug` + `assembleInrtDebug`；还原 version.properties；
 5. 全量搜索 `@mgmt-hook` 核对 7+2 处齐全，跑 `MGMT_LAYER.md` §9 冒烟清单；
-6. 推送 origin mgmt，业务仓 `git subtree pull` 同步。
+6. 推送 origin mgmt；业务仓执行 `git submodule update --remote AutoJs6-master` 并提交新指针同步。
 
 ---
 
