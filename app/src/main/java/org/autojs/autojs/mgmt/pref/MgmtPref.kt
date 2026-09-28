@@ -8,17 +8,16 @@ import org.autojs.autojs.util.NetworkUtils
  * 管理平台薄层 (org.autojs.autojs.mgmt) 的配置存取。
  *
  * 独立于上游 org.autojs.autojs.core.pref.Pref, 直接读写默认 SharedPreferences,
- * 不改动上游 Pref.kt。存储键与历史版本 (6.6.x 定制版) 完全一致,
- * 已在设备上填写过的服务器地址/秘钥升级后不丢失。
+ * 不改动上游 Pref.kt。存储键为固定契约, 不得改名:
+ * 已在设备上填写过的服务器地址/秘钥依赖此二键, 改名会导致升级后配置丢失。
  */
 object MgmtPref {
 
-    // 与上游 string 资源 key_management_platform_* 的字面值保持一致。
     private const val KEY_SERVER_ADDRESS = "key_\$_management_platform_server_address"
     private const val KEY_SECRET = "key_\$_management_platform_secret"
 
-    // 地址未填写时, 沿用旧版逻辑: 默认回落到 PC 端调试服务地址 (key_$_server_address,
-    // 再缺省为网关地址), 保持与 6.6.x 定制版相同的取值体验。
+    // 平台地址未填写时回落到上游"连接到计算机"地址 (key_$_server_address),
+    // 再缺省为网关地址。
     private const val LEGACY_KEY_SERVER_ADDRESS = "key_\$_server_address"
 
     private val sharedPreferences

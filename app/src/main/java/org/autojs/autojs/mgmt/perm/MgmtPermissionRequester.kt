@@ -9,9 +9,8 @@ import android.os.Build
 /**
  * 管理平台薄层运行时权限申请 (F24)。
  *
- * 旧版在 MainActivity 的权限准备流程中直接申请 BLUETOOTH_CONNECT/SCAN (Android S+)。
- * 薄层化后改为 Application 级 ActivityLifecycleCallbacks, 在主界面 resume 时按需申请,
- * 从而不再修改上游 MainActivity.kt。
+ * BLUETOOTH_CONNECT/SCAN (Android S+) 不经上游 MainActivity 申请 (零修改红线),
+ * 改为 Application 级 ActivityLifecycleCallbacks, 在主界面 resume 时按需申请。
  */
 object MgmtPermissionRequester {
 

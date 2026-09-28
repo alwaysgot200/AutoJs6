@@ -24,7 +24,7 @@
 **明确不做**（避免与上游耦合、便于升级）
 
 - 不改 32 种消息协议、不加 MQTT、不做协议信封改造；
-- 不拆分 god class（`ManagementPlatformClient` 保持单文件，与 6.6.x 定制版逐行等价迁移）；
+- 不拆分 god class（`ManagementPlatformClient` 保持单文件，本期不拆，降低协议搬迁风险）；
 - 不引入第二套网络库/JSON 库/依赖注入；不新增第三方依赖（okhttp/okio 上游已有）；
 - 不修改上游 `Pref.kt`、`MainActivity.kt`（零修改红线，升级冲突最小化）。
 
@@ -49,13 +49,13 @@ app/src/main/java/org/autojs/autojs/mgmt/
 ### 关键配置事实
 
 - 偏好文件：`org.autojs.autojs6_preferences.xml`（PreferenceManager 默认 SP）。
-- 键字面值与 6.6.x 定制版**逐字符一致**，升级安装配置不丢：
+- 键字面值是**固定契约**（已安装版本依赖此二键，改名会丢用户配置）：
   - `key_$_management_platform_server_address`（Kotlin 源码写 `"\$_"`）
   - `key_$_management_platform_secret`
   - 回落键：`key_$_server_address`，再回落 `NetworkUtils.getGatewayAddress()`。
 - WS 接入 URL：`{serverAddress}/ws/device?deviceId=<id>&matchCode=<secret>`。
 - APK 下载 URL：`{serverAddress}/api/apk/files/{fileName}?matchCode=<secret>`。
-- 设备标识 `deviceId()` 沿用旧版来源（androidId 等），与服务端 `device_info.device_id` 对齐。
+- 设备标识 `deviceId()` 取 androidId → serial → MODEL 三级回退，与服务端 `device_info.device_id` 对齐。
 
 ---
 
@@ -71,7 +71,7 @@ app/src/main/java/org/autojs/autojs/mgmt/
 | H4 | `.../core/accessibility/AccessibilityService.kt` | L161-162、L173-174（+import L14） | `onDestroy` / `onServiceConnected` 各调一次 `Mgmt.onAccessibilityStateChanged()`（注意：清单中实际绑定服务是 `AccessibilityServiceUsher`） |
 | H5 | `.../external/receiver/BaseBroadcastReceiver.java` | L30-35（+import L11） | try/catch 包裹 `Mgmt.connectIfConfigured()`，广播唤起不得因薄层崩溃 |
 | H7 | `app/src/main/res/xml/fragment_preferences.xml` | L196-210 | 三个 Preference（class 指向 `org.autojs.autojs.mgmt.ui.*`） |
-| H8 | `res/values/strings.xml` L175、`res/values-zh/strings.xml` L1430 | — | 薄层文案（英文 9 条 / 中文 6 条），key 与旧版一致 |
+| H8 | `res/values/strings.xml` L175、`res/values-zh/strings.xml` L1430 | — | 薄层文案（英文 9 条 / 中文 6 条），仅追加 |
 
 > 编号 H6 保留未用（历史方案中曾规划、后取消），不补号。
 
@@ -142,44 +142,43 @@ $env:JAVA_TOOL_OPTIONS='-Dhttp.proxyHost=127.0.0.1 -Dhttp.proxyPort=10808 -Dhttp
 5. 构建双 flavor：
    `.\gradlew.bat :app:assembleAppDebug` 与 `.\gradlew.bat :app:assembleInrtDebug`。
 6. **构建后还原** `git checkout -- version.properties`（构建脚本会自动改写 BUILD 号与时间戳，禁止提交）。
-7. 冒烟：安装 x86_64 split 包到模拟器，照 §8 清单走核心链路；再出 arm64/universal 包。
-8. keystore（`app/src/main/assets/autojs.keystore`、`default_key_store.bks`）上游仓库自带且被跟踪，无需恢复。
+7. 冒烟：安装 x86_64 split 包到模拟器，照 §9 记录走核心链路；再出 arm64/universal 包。
+8. keystore（`app/src/main/assets/autojs.keystore`、`default_key_store.bks`）上游仓库自带，无需自备。
+9. 推送 `origin vendor` 与 `origin mgmt`，再到业务仓执行 §6.1 subtree pull。
 
-### 6.1 业务仓（monorepo）侧同步
+### 6.1 仓库拓扑与业务仓（monorepo）同步
 
-本 fork 以 `git subtree --prefix=AutoJs6-master --squash` 合入业务仓 `d:\autojs6_Management`。
-fork 侧 `mgmt` 分支有新提交后，在业务仓执行（工作区必须干净，有 WIP 先 stash）：
+```
+GitHub fork  https://github.com/<你的GitHub用户名>/AutoJs6.git   → 本地 remote origin
+上游         https://github.com/SuperMonster003/AutoJs6.git      → 本地 remote upstream
+  vendor 分支 = 上游纯净镜像；mgmt 分支 = vendor + 本文件全部定制
+业务仓 d:\autojs6_Management
+  AutoJs6-master/ = git subtree --prefix=AutoJs6-master 挂入 mgmt（--squash）
+```
+
+fork 侧 `mgmt` 分支有新提交并推送后，在业务仓执行（工作区必须干净，有 WIP 先 stash）：
 
 ```bash
 git stash push -m "wip-before-subtree-pull"
-git subtree pull --prefix=AutoJs6-master D:/work/autojs6-fork mgmt --squash
+git subtree pull --prefix=AutoJs6-master https://github.com/<你的GitHub用户名>/AutoJs6.git mgmt --squash
 git stash pop
 ```
 
 - 业务仓内**只允许**通过 `git subtree pull` 更新本目录；不要在业务仓直接改
   `AutoJs6-master/` 内文件（改动回灌不到 fork，下次 pull 必冲突）。
-- 如需在业务仓临时改客户端，先去 fork 改并提交，再 subtree pull。
-- subtree 远程目前指向本地路径 `D:/work/autojs6-fork`；GitHub fork 建立后可加名为
-  `autojs6-fork` 的远程替换之。
+- 如需改客户端，先在 fork 的 `mgmt` 分支提交并推送，再 subtree pull。
+- 首次挂入用 `git subtree add --prefix=AutoJs6-master <fork-url> mgmt --squash`。
+- GitHub fork 建成前，subtree 远程可临时指本地路径 `D:/work/autojs6-fork`，建后统一换回 URL。
 
 ---
 
-## 7. 历史构建修补复核结论（B3–B9：均不迁移）
+## 7. 构建环境约定（仓库外）
 
-6.6.x 定制版相对其时代上游曾有 9 类构建修补；逐一复核 ed3eb10e 基线后结论：
-
-| 编号 | 内容 | 结论 |
-|---|---|---|
-| B1/B2 | 即当前 `vendor:fix` 两项（见 §8） | 已迁移 |
-| B3 | `app/build.gradle.kts` ignoreAssets 简化、packagingOptions→resources、Sign 相对路径 | fa47 时代工具链绕过/发布便利，ed3 原生脚本构建正常，**不迁移** |
-| B4 | `libs/utils.build.gradle` 下载器容错/镜像/进度条 | 代理 + init.gradle.kts 阿里云镜像下官方 deployer 完整成功；补丁无法干净套用，**不迁移** |
-| B5 | LibDeployer 校验 | ed3 未复现，**不迁移** |
-| B6 | paddleocr/rapidocr skipLibDeploy/offline 开关 | 已被 init.gradle 镜像取代，**不迁移** |
-| B7 | paddle CCMake 修补 | 已失效/不需要，**不迁移** |
-| B8 | imagequant guard | 构建未触发，**不迁移** |
-| B9 | `.run/app.run.xml` IDEA 运行配置 | 不入库，**不迁移** |
-
-`gradle-wrapper.properties` 的腾讯镜像差异同样不迁移（本机走 init.gradle.kts 镜像）。
+仓库内**不携带任何构建补丁或镜像配置**：Maven 镜像放开发机 `~/.gradle/init.gradle.kts`
+（阿里云镜像前置），代理走 `JAVA_TOOL_OPTIONS`（127.0.0.1:10808）；
+`gradle-wrapper.properties`、`settings.gradle.kts`、各模块 `build.gradle*` 与上游保持一致，
+官方 deployer 在上述环境下可完整构建。`.run/`、`.idea/`、`.cxx/`、OCR 构建产物、
+`version.properties` 改写均不入库。
 
 ---
 
@@ -196,7 +195,7 @@ git stash pop
 
 ## 9. 冒烟验证记录（2026-09-28，基线 ed3eb10e / BUILD 3804，模拟器 Android 16 x86_64）
 
-升级安装保留旧 SP，键字面值一致、配置不丢。以下链路实测通过：
+覆盖安装保留已有 SP（键契约不变），配置不丢。以下链路实测通过：
 
 - FGS 启动/保活；后台拒绝场景的崩溃防护与有界重试（commit 4c5e5b75）；
 - WS 上线 `AUTH_OK`，`device_info.status=online`、`app_version=6.7.0 (3804)`，15s 心跳；
@@ -218,5 +217,5 @@ git stash pop
 
 已知非缺陷现象：模拟器冷启动 JIT/dex 校验风暴偶发系统 ANR 弹窗（主线程卡在
 LocaleManager binder，与薄层无关），点等待/二次启动即恢复，真机预期无此问题；
-脚本内主动 `exit()` 会令引擎抛 `ScriptInterruptedException`，运行事件记为 error，
-6.6.x 定制版行为相同（日志中脚本实际正常「运行结束」）。
+脚本内主动 `exit()` 会令引擎抛 `ScriptInterruptedException`，运行事件记为 error
+（日志中脚本实际正常「运行结束」），属引擎既有行为。
