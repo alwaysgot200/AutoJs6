@@ -149,7 +149,7 @@ $env:JAVA_TOOL_OPTIONS='-Dhttp.proxyHost=127.0.0.1 -Dhttp.proxyPort=10808 -Dhttp
 ### 6.1 仓库拓扑与业务仓（monorepo）同步
 
 ```
-GitHub fork  https://github.com/<你的GitHub用户名>/AutoJs6.git   → 本地 remote origin
+GitHub fork  https://github.com/alwaysgot200/AutoJs6.git             → 本地 remote origin
 上游         https://github.com/SuperMonster003/AutoJs6.git      → 本地 remote upstream
   vendor 分支 = 上游纯净镜像；mgmt 分支 = vendor + 本文件全部定制
 业务仓 d:\autojs6_Management
@@ -160,15 +160,15 @@ fork 侧 `mgmt` 分支有新提交并推送后，在业务仓执行（工作区�
 
 ```bash
 git stash push -m "wip-before-subtree-pull"
-git subtree pull --prefix=AutoJs6-master https://github.com/<你的GitHub用户名>/AutoJs6.git mgmt --squash
+git subtree pull --prefix=AutoJs6-master https://github.com/alwaysgot200/AutoJs6.git mgmt --squash
 git stash pop
 ```
 
 - 业务仓内**只允许**通过 `git subtree pull` 更新本目录；不要在业务仓直接改
   `AutoJs6-master/` 内文件（改动回灌不到 fork，下次 pull 必冲突）。
 - 如需改客户端，先在 fork 的 `mgmt` 分支提交并推送，再 subtree pull。
-- 首次挂入用 `git subtree add --prefix=AutoJs6-master <fork-url> mgmt --squash`。
-- GitHub fork 建成前，subtree 远程可临时指本地路径 `D:/work/autojs6-fork`，建后统一换回 URL。
+- 首次挂入用 `git subtree add --prefix=AutoJs6-master https://github.com/alwaysgot200/AutoJs6.git mgmt --squash`。
+- 推送到 GitHub 需走本机代理时，先设置 `$env:HTTPS_PROXY='http://127.0.0.1:10808'`（PowerShell）。
 
 ---
 
