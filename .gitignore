@@ -28,6 +28,7 @@ desktop.ini
 !.idea/shared-intellij-idea-settings.zip
 
 /build/
+/build-logic/**/bin/
 /libs/**/build/
 /modules/**/build/
 /plugin-api/**/build/
