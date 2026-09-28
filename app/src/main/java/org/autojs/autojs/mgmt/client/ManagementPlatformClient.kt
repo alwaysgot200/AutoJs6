@@ -162,6 +162,15 @@ object ManagementPlatformClient {
     private const val FRAME_FLAG_KEYFRAME: Int = 0x01
     private const val MEDIA_HEADER_SIZE = 24
 
+    /**
+     * 系统无障碍截图最小间隔限流 (errorCode=3 ERROR_TAKE_SCREENSHOT_INTERVAL_TIME_SHORT，
+     * Android 16/API36 模拟器实测值；旧资料误记为 1，一律以符号常量为准) 的退避重试：
+     * 连续/过快抓帧时系统直接拒绝，按 350ms 线性退避最多重试 3 次；重试期间 in-flight 保持，
+     * 聚合到的 commandId 最终随成功帧/失败原因一起回执。
+     */
+    private const val SCREENSHOT_MAX_ATTEMPTS = 3
+    private const val SCREENSHOT_RATE_LIMIT_RETRY_BASE_MS = 350L
+
     /** 媒体帧序号（截图/投屏共用，单调递增，跳过 0，回绕允许），服务端据此丢弃过期帧。 */
     private var mediaSequence: Int = 0
 
@@ -1485,51 +1494,65 @@ object ManagementPlatformClient {
             return
         }
 
-        try {
-            // 关键：Executor 用截图专用后台线程，不再传 service.mainExecutor，避免连续抓帧卡死主线程
-            service.takeScreenshot(
-                Display.DEFAULT_DISPLAY,
-                shotExecutor,
-                object : AndroidAccessibilityService.TakeScreenshotCallback {
-                    override fun onSuccess(screenshot: AndroidAccessibilityService.ScreenshotResult) {
-                        val hardwareBuffer = screenshot.hardwareBuffer
-                        try {
-                            val hardwareBitmap = Bitmap.wrapHardwareBuffer(hardwareBuffer, screenshot.colorSpace)
-                            if (hardwareBitmap == null) {
-                                Log.w(TAG, "Screenshot hardwareBitmap is null")
-                                finish(false, "系统截图返回空数据，请稍后重试（或检查无障碍服务是否被系统限制）")
-                                return
-                            }
-                            val bitmap = try {
-                                hardwareBitmap.copy(Bitmap.Config.ARGB_8888, true)
+        // 抽成本地递归函数：系统限流 (errorCode=1) 时在截图线程上退避重试，避免连续抓帧直接失败
+        fun dispatchAccessibilityScreenshot(attempt: Int) {
+            try {
+                // 关键：Executor 用截图专用后台线程，不再传 service.mainExecutor，避免连续抓帧卡死主线程
+                service.takeScreenshot(
+                    Display.DEFAULT_DISPLAY,
+                    shotExecutor,
+                    object : AndroidAccessibilityService.TakeScreenshotCallback {
+                        override fun onSuccess(screenshot: AndroidAccessibilityService.ScreenshotResult) {
+                            val hardwareBuffer = screenshot.hardwareBuffer
+                            try {
+                                val hardwareBitmap = Bitmap.wrapHardwareBuffer(hardwareBuffer, screenshot.colorSpace)
+                                if (hardwareBitmap == null) {
+                                    Log.w(TAG, "Screenshot hardwareBitmap is null")
+                                    finish(false, "系统截图返回空数据，请稍后重试（或检查无障碍服务是否被系统限制）")
+                                    return
+                                }
+                                val bitmap = try {
+                                    hardwareBitmap.copy(Bitmap.Config.ARGB_8888, true)
+                                } finally {
+                                    hardwareBitmap.recycle()
+                                }
+                                if (bitmap == null) {
+                                    finish(false, "截图内存不足，请稍后重试")
+                                    return
+                                }
+                                val sent = sendScreenshotBitmap(bitmap, quality, maxWidth, maxHeight)
+                                finish(sent, if (sent) null else "截图回传失败，请检查设备网络连接后重试")
+                            } catch (e: Exception) {
+                                Log.w(TAG, "Failed to handle screenshot success", e)
+                                finish(false, "截图处理失败：${e.message ?: e.javaClass.simpleName}")
                             } finally {
-                                hardwareBitmap.recycle()
+                                // HardwareBuffer 必须显式关闭，否则连续抓帧会泄漏图形内存（远程截图方案 A 关键修复）
+                                runCatching { hardwareBuffer.close() }
                             }
-                            if (bitmap == null) {
-                                finish(false, "截图内存不足，请稍后重试")
+                        }
+
+                        override fun onFailure(errorCode: Int) {
+                            Log.w(TAG, "Screenshot failed, errorCode=$errorCode, attempt=$attempt")
+                            if (errorCode == AndroidAccessibilityService.ERROR_TAKE_SCREENSHOT_INTERVAL_TIME_SHORT &&
+                                attempt < SCREENSHOT_MAX_ATTEMPTS - 1
+                            ) {
+                                // in-flight 继续保持，聚合到的请求随本次结果一起回执；线性退避 350/700ms
+                                val delayMs = SCREENSHOT_RATE_LIMIT_RETRY_BASE_MS * (attempt + 1)
+                                Log.d(TAG, "Screenshot rate-limited, retry in ${delayMs}ms (attempt=${attempt + 1})")
+                                shotHandler.postDelayed({ dispatchAccessibilityScreenshot(attempt + 1) }, delayMs)
                                 return
                             }
-                            val sent = sendScreenshotBitmap(bitmap, quality, maxWidth, maxHeight)
-                            finish(sent, if (sent) null else "截图回传失败，请检查设备网络连接后重试")
-                        } catch (e: Exception) {
-                            Log.w(TAG, "Failed to handle screenshot success", e)
-                            finish(false, "截图处理失败：${e.message ?: e.javaClass.simpleName}")
-                        } finally {
-                            // HardwareBuffer 必须显式关闭，否则连续抓帧会泄漏图形内存（远程截图方案 A 关键修复）
-                            runCatching { hardwareBuffer.close() }
+                            finish(false, "系统拒绝截图 (errorCode=$errorCode)。$HINT_ACCESSIBILITY")
                         }
-                    }
-
-                    override fun onFailure(errorCode: Int) {
-                        Log.w(TAG, "Screenshot failed, errorCode=$errorCode")
-                        finish(false, "系统拒绝截图 (errorCode=$errorCode)。$HINT_ACCESSIBILITY")
-                    }
-                },
-            )
-        } catch (e: Throwable) {
-            Log.w(TAG, "Failed to request screenshot", e)
-            finish(false, "截图调用异常：${e.message ?: e.javaClass.simpleName}。$HINT_ACCESSIBILITY")
+                    },
+                )
+            } catch (e: Throwable) {
+                Log.w(TAG, "Failed to request screenshot", e)
+                finish(false, "截图调用异常：${e.message ?: e.javaClass.simpleName}。$HINT_ACCESSIBILITY")
+            }
         }
+
+        dispatchAccessibilityScreenshot(0)
     }
 
     /**
