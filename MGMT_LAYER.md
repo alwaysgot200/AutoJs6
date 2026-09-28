@@ -145,6 +145,23 @@ $env:JAVA_TOOL_OPTIONS='-Dhttp.proxyHost=127.0.0.1 -Dhttp.proxyPort=10808 -Dhttp
 7. 冒烟：安装 x86_64 split 包到模拟器，照 §8 清单走核心链路；再出 arm64/universal 包。
 8. keystore（`app/src/main/assets/autojs.keystore`、`default_key_store.bks`）上游仓库自带且被跟踪，无需恢复。
 
+### 6.1 业务仓（monorepo）侧同步
+
+本 fork 以 `git subtree --prefix=AutoJs6-master --squash` 合入业务仓 `d:\autojs6_Management`。
+fork 侧 `mgmt` 分支有新提交后，在业务仓执行（工作区必须干净，有 WIP 先 stash）：
+
+```bash
+git stash push -m "wip-before-subtree-pull"
+git subtree pull --prefix=AutoJs6-master D:/work/autojs6-fork mgmt --squash
+git stash pop
+```
+
+- 业务仓内**只允许**通过 `git subtree pull` 更新本目录；不要在业务仓直接改
+  `AutoJs6-master/` 内文件（改动回灌不到 fork，下次 pull 必冲突）。
+- 如需在业务仓临时改客户端，先去 fork 改并提交，再 subtree pull。
+- subtree 远程目前指向本地路径 `D:/work/autojs6-fork`；GitHub fork 建立后可加名为
+  `autojs6-fork` 的远程替换之。
+
 ---
 
 ## 7. 历史构建修补复核结论（B3–B9：均不迁移）
