@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- @mgmt-hook H9: 薄层视图 tag 标记 (避免在同一 View 上重复挂监听)。 -->
+<resources>
+    <item name="mgmt_tag_attach_self_heal" type="id" />
+</resources>

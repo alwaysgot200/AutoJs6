@@ -1429,11 +1429,26 @@
     <string name="text_xiaomi_background_popup_permission">后台弹出界面</string>
     <!-- @mgmt-hook H8: 管理平台薄层 (org.autojs.autojs.mgmt) 中文文案。 -->
     <string name="text_management_platform_server_address">管理平台服务器地址</string>
-    <string name="text_management_platform_secret">管理平台秘钥</string>
-    <string name="text_management_platform_test_connection">测试连接管理平台</string>
-    <string name="text_management_platform_connected">已连接到平台</string>
     <string name="text_management_platform_connection_success">成功连接到管理平台</string>
-    <string name="text_management_platform_connection_failed">连接管理平台失败: %1$s</string>
+    <!-- @mgmt-hook H8/H9: 抽屉「登录」分区与弹窗中文文案。 -->
+    <string name="mgmt_text_login_group">登录</string>
+    <string name="mgmt_text_login_platform">登录平台</string>
+    <string name="mgmt_text_logged_in">已登录</string>
+    <string name="mgmt_dialog_login_title">管理平台</string>
+    <string name="mgmt_dialog_login_subtitle">登录后可远程管理脚本与设备</string>
+    <string name="mgmt_text_platform_api_key">平台 API Key</string>
+    <string name="mgmt_text_api_key_helper">使用平台租户设置中的设备接入码</string>
+    <string name="mgmt_text_login_empty_input">请填写服务器地址和平台 API Key</string>
+    <string name="mgmt_text_login_failed_generic">连接失败，请检查服务器地址和 API Key</string>
+    <string name="mgmt_dialog_logged_in_subtitle">已连接到管理平台</string>
+    <string name="mgmt_text_username">租户</string>
+    <string name="mgmt_text_device_id">设备 ID</string>
+    <string name="mgmt_text_server">服务器</string>
+    <string name="mgmt_text_copy">复制</string>
+    <string name="mgmt_text_copied">设备 ID 已复制</string>
+    <string name="mgmt_text_close">关闭</string>
+    <string name="mgmt_action_logout">退出登录</string>
+    <string name="mgmt_text_logged_out">已退出登录</string>
     <string name="warn_continue_operation_without_saving_settings">设置尚未保存, 确定要继续操作吗</string>
     <string name="warn_exit_without_saving_settings">设置尚未保存, 确定要退出吗</string>
 </resources>

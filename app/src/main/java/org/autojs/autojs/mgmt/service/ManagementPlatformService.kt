@@ -79,6 +79,7 @@ class ManagementPlatformService : Service() {
     private fun hasValidConfig(): Boolean {
         val address = MgmtPref.serverAddress.trim()
         val secret = MgmtPref.secret.trim()
-        return address.isNotEmpty() && secret.isNotEmpty()
+        // 用户已退出登录时即使凭证保留也不得自动上线 (服务随即 stopSelf, 不滞留通知栏)。
+        return address.isNotEmpty() && secret.isNotEmpty() && MgmtPref.sessionEnabled
     }
 }

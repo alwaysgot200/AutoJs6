@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- @mgmt-hook H9: 弹窗头部圆形图标底色 (品牌青)。 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="oval">
+    <solid android:color="@color/mgmt_color_brand_container" />
+</shape>

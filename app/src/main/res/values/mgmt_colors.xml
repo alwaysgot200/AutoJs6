@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- @mgmt-hook H8: 抽屉登录弹窗专用色板 (mgmt_ 前缀, 只增不覆盖官方资源)。 -->
+<resources>
+    <!-- 已登录状态绿 -->
+    <color name="mgmt_color_connected">#2E7D32</color>
+    <color name="mgmt_color_connected_container">#E8F5E9</color>
+    <!-- 品牌头标浅底 -->
+    <color name="mgmt_color_brand_container">#E0F2F1</color>
+    <color name="mgmt_color_brand">#00796B</color>
+    <!-- 退出登录/错误文案 -->
+    <color name="mgmt_color_logout">#C62828</color>
+    <color name="mgmt_color_error">#D32F2F</color>
+    <!-- 次级文字 / 信息卡片底 -->
+    <color name="mgmt_color_text_secondary">#5F6368</color>
+    <color name="mgmt_color_info_container">#F5F7F8</color>
+</resources>

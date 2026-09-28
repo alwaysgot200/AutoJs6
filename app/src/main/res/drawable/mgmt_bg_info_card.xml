@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- @mgmt-hook H9: 已登录弹窗信息行卡片底色 (圆角浅灰)。 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="@color/mgmt_color_info_container" />
+    <corners android:radius="10dp" />
+</shape>

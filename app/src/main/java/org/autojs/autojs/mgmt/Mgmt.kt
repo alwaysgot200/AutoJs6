@@ -1,6 +1,7 @@
 package org.autojs.autojs.mgmt
 
 import android.app.Application
+import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.Handler
@@ -9,8 +10,11 @@ import android.util.Log
 import org.autojs.autojs.engine.ScriptEngineService
 import org.autojs.autojs.mgmt.client.ManagementPlatformClient
 import org.autojs.autojs.mgmt.perm.MgmtPermissionRequester
+import org.autojs.autojs.mgmt.pref.MgmtPref
 import org.autojs.autojs.mgmt.script.ManagementPlatformScriptExecutionListener
 import org.autojs.autojs.mgmt.service.ManagementPlatformService
+import org.autojs.autojs.mgmt.ui.MgmtPlatformLoginMenu
+import org.autojs.autojs.ui.main.drawer.DrawerMenuItem
 
 /**
  * 管理平台薄层唯一门面 (详见 MGMT_LAYER.md)。
@@ -92,5 +96,41 @@ object Mgmt {
     @JvmStatic
     fun connectIfConfigured() {
         runCatching { ManagementPlatformClient.connectIfConfigured() }
+    }
+
+    /**
+     * H9: 在官方抽屉菜单最前插入「登录」分区 (group + 单条目), 逻辑见 [MgmtPlatformLoginMenu]。
+     */
+    @JvmStatic
+    fun decorateDrawerMenuItems(items: List<DrawerMenuItem>): List<DrawerMenuItem> =
+        MgmtPlatformLoginMenu.decorate(items)
+
+    /**
+     * 抽屉登录弹窗测试通过后拉起前台服务建立正式持久连接 (与设置页入口同一行为)。
+     */
+    @JvmStatic
+    fun startManagementService(context: Context) {
+        runCatching {
+            val intent = Intent(context, ManagementPlatformService::class.java)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(intent)
+            } else {
+                context.startService(intent)
+            }
+        }.onFailure {
+            Log.w(TAG, "ManagementPlatformService start rejected: ${it.message}")
+        }
+    }
+
+    /**
+     * 退出登录: 先把登录态开关置 false (地址/秘钥保留, 供下次登录弹窗回填),
+     * 再取消重连并关闭 WS、停止前台服务。顺序不可调换, 否则 onClosed 的退避重连
+     * 与 START_STICKY 服务重建会再次上线。
+     */
+    @JvmStatic
+    fun logout(context: Context) {
+        MgmtPref.sessionEnabled = false
+        ManagementPlatformClient.logout()
+        runCatching { context.stopService(Intent(context, ManagementPlatformService::class.java)) }
     }
 }

@@ -25,6 +25,7 @@ import org.autojs.autojs.core.plugin.center.PluginCenterActivity
 import org.autojs.autojs.core.pref.Pref
 import org.autojs.autojs.core.pref.PrefRx
 import org.autojs.autojs.external.foreground.AppForegroundService
+import org.autojs.autojs.mgmt.Mgmt
 import org.autojs.autojs.permission.AllFilesAccessPermission
 import org.autojs.autojs.permission.DisplayOverOtherAppsPermission
 import org.autojs.autojs.permission.IgnoreBatteryOptimizationsPermission
@@ -881,7 +882,8 @@ open class DrawerFragment : Fragment() {
             mAboutAppAndDevItem,
         )
 
-        val drawerMenuAdapter = DrawerMenuAdapter(items.filterNot { it.isHidden })
+        // @mgmt-hook H9: 薄层在抽屉菜单最前插入「登录」分区 (group + 单条目), 不改官方条目。
+        val drawerMenuAdapter = DrawerMenuAdapter(Mgmt.decorateDrawerMenuItems(items).filterNot { it.isHidden })
 
         // Wire item change notifications to this fragment's adapter instance.
         // zh-CN: 将 item 的刷新通知绑定到当前 Fragment 的 adapter 实例.

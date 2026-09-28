@@ -92,6 +92,18 @@ object ManagementPlatformClient {
         private set
 
     /**
+     * 最近一次 AUTH_OK 携带的租户标识/名称。tenantName 为服务端 2026-09-28 起追加的可选字段,
+     * 缺失时 UI 回落展示 tenantId; 断线/退出登录后清空。
+     */
+    @Volatile
+    var tenantId: String? = null
+        private set
+
+    @Volatile
+    var tenantName: String? = null
+        private set
+
+    /**
      * 最近一次连接是否被服务端明确拒绝 (收到 AUTH_FAILED 文本)。
      * 关闭帧可能因网络竞态丢失 (客户端表现为 onFailure 且拿不到 4001),
      * 因此应用层 AUTH_FAILED 也要作为慢速重试的判据。
@@ -263,12 +275,36 @@ object ManagementPlatformClient {
     fun connectIfConfigured() {
         val address = MgmtPref.serverAddress.trim()
         val secret = MgmtPref.secret.trim()
-        if (address.isEmpty() || secret.isEmpty()) {
-            // 配置被清空: 无连接可言, 立即翻转 UI 状态
+        if (address.isEmpty() || secret.isEmpty() || !MgmtPref.sessionEnabled) {
+            // 配置不完整, 或用户已退出登录 (凭证保留但不自动上线): 立即翻转 UI 状态
             setConnected(false)
             return
         }
         connect(address)
+    }
+
+    /**
+     * 用户主动退出登录: 取消退避重连/心跳, 关闭 WebSocket, 清空鉴权展示信息并翻转 UI。
+     *
+     * 调用方 (Mgmt 门面) 必须**先**把 MgmtPref.sessionEnabled 置为 false (地址/秘钥可保留
+     * 供登录弹窗回填)、再停止前台服务: close 触发的 onClosed 会走 scheduleReconnect,
+     * 开关为 false 使其立即跳过; 否则 START_STICKY 服务下次被系统重建时会再次上线。
+     */
+    @Synchronized
+    fun logout() {
+        reconnectFuture?.cancel(false)
+        reconnectFuture = null
+        stopHeartbeat()
+        connectionActive = false
+        authRejected = false
+        lastConnectKey = null
+        tenantId = null
+        tenantName = null
+        val ws = webSocket
+        webSocket = null
+        runCatching { ws?.close(1000, "user logout") }
+        setConnected(false)
+        Log.i(TAG, "user logged out from management platform")
     }
 
     @Synchronized
@@ -291,6 +327,8 @@ object ManagementPlatformClient {
         // 新连接建立期间一律视为未连接, 直到收到 AUTH_OK 再翻回 (重连时通常本就是 false)
         setConnected(false)
         authRejected = false
+        tenantId = null
+        tenantName = null
         selfHealTriedForConnection = false
         webSocket?.cancel()
         connectionActive = true
@@ -575,7 +613,7 @@ object ManagementPlatformClient {
     private fun scheduleReconnect(authFailed: Boolean = false) {
         val address = MgmtPref.serverAddress.trim()
         val secret = MgmtPref.secret.trim()
-        if (address.isEmpty() || secret.isEmpty()) {
+        if (address.isEmpty() || secret.isEmpty() || !MgmtPref.sessionEnabled) {
             return
         }
         reconnectFuture?.cancel(false)
@@ -703,6 +741,8 @@ object ManagementPlatformClient {
                 "AUTH_OK" -> {
                     // 正式连接鉴权通过: 此时才是真正"已连接到平台"
                     Log.d(TAG, "AUTH_OK, connected to platform")
+                    tenantId = payload.optString("tenantId").takeIf { it.isNotEmpty() }
+                    tenantName = payload.optString("tenantName").takeIf { it.isNotEmpty() }
                     setConnected(true)
                 }
                 "AUTH_FAILED" -> {
@@ -2032,16 +2072,29 @@ object ManagementPlatformClient {
         }
     }
 
-    private fun deviceId(): String {
-        val device = Device(appContext)
-        val androidId = device.androidId
-        if (!androidId.isNullOrEmpty()) {
-            return androidId
+    private val deviceIdLock = Any()
+
+    @Volatile
+    private var cachedDeviceId: String? = null
+
+    /**
+     * 设备稳定标识: 直接读 Settings.Secure.ANDROID_ID 并缓存。
+     *
+     * 禁止用 `Device(appContext).androidId` 实现: runtime.api.Device 构造时会同步调用
+     * TelephonyManager.getImei / getSerial 两个 binder, 在抽屉行点击/弹窗打开等主线程路径上
+     * 实测可阻塞 5s+ 触发系统 ANR (2026-09-28 模拟器堆栈实证); 且 deviceId 在渲染/建链/
+     * 心跳路径高频调用, 构造开销会被放大。ANDROID_ID 首读即可, 缺失回落机型名。
+     */
+    fun deviceId(): String {
+        cachedDeviceId?.let { return it }
+        synchronized(deviceIdLock) {
+            cachedDeviceId?.let { return it }
+            val id = Settings.Secure.getString(appContext.contentResolver, Settings.Secure.ANDROID_ID)
+                ?.takeIf { it.isNotEmpty() }
+                ?: Build.MODEL?.takeIf { it.isNotEmpty() }
+                ?: "unknown"
+            cachedDeviceId = id
+            return id
         }
-        val serial = Device.serial
-        if (!serial.isNullOrEmpty()) {
-            return serial
-        }
-        return Build.MODEL ?: "unknown"
     }
 }

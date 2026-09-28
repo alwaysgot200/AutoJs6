@@ -1,0 +1,138 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- @mgmt-hook H9: 抽屉「登录平台」弹窗 (头部 + 服务器地址 / 平台 API Key + 行内错误与连接进度)。 -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:paddingStart="4dp"
+    android:paddingEnd="4dp">
+
+    <!-- 头部: 品牌圆标 + 标题/副标题 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <ImageView
+            android:layout_width="46dp"
+            android:layout_height="46dp"
+            android:background="@drawable/mgmt_bg_icon_circle"
+            android:padding="11dp"
+            android:contentDescription="@null"
+            android:src="@drawable/mgmt_ic_login"
+            app:tint="@color/mgmt_color_brand" />
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="12dp"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/mgmt_dialog_login_title"
+                android:textColor="@color/text_color_primary"
+                android:textSize="18sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:text="@string/mgmt_dialog_login_subtitle"
+                android:textColor="@color/mgmt_color_text_secondary"
+                android:textSize="13sp" />
+
+        </LinearLayout>
+
+    </LinearLayout>
+
+    <!-- 服务器地址 -->
+    <org.autojs.autojs.theme.widget.ThemeColorTextInputLayout
+        android:id="@+id/mgmt_server_address_layout"
+        style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="18dp"
+        app:boxCornerRadiusBottomEnd="10dp"
+        app:boxCornerRadiusBottomStart="10dp"
+        app:boxCornerRadiusTopEnd="10dp"
+        app:boxCornerRadiusTopStart="10dp"
+        app:hintEnabled="true"
+        app:startIconDrawable="@drawable/mgmt_ic_server">
+
+        <com.google.android.material.textfield.TextInputEditText
+            android:id="@+id/mgmt_server_address"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:autofillHints="@string/text_management_platform_server_address"
+            android:hint="@string/text_management_platform_server_address"
+            android:imeOptions="actionNext"
+            android:importantForAutofill="yes"
+            android:inputType="textUri"
+            android:maxLines="1"
+            android:singleLine="true"
+            android:textColor="@color/text_color_primary"
+            android:textSize="15sp" />
+
+    </org.autojs.autojs.theme.widget.ThemeColorTextInputLayout>
+
+    <!-- 平台 API Key (眼睛图标切换明文/密文) -->
+    <org.autojs.autojs.theme.widget.ThemeColorTextInputLayout
+        android:id="@+id/mgmt_api_key_layout"
+        style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        app:boxCornerRadiusBottomEnd="10dp"
+        app:boxCornerRadiusBottomStart="10dp"
+        app:boxCornerRadiusTopEnd="10dp"
+        app:boxCornerRadiusTopStart="10dp"
+        app:endIconMode="password_toggle"
+        app:helperText="@string/mgmt_text_api_key_helper"
+        app:helperTextTextColor="@color/mgmt_color_text_secondary"
+        app:hintEnabled="true"
+        app:startIconDrawable="@drawable/mgmt_ic_key">
+
+        <com.google.android.material.textfield.TextInputEditText
+            android:id="@+id/mgmt_api_key"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:autofillHints="@string/mgmt_text_platform_api_key"
+            android:hint="@string/mgmt_text_platform_api_key"
+            android:imeOptions="actionDone"
+            android:importantForAutofill="yes"
+            android:inputType="textVisiblePassword"
+            android:maxLines="1"
+            android:singleLine="true"
+            android:textColor="@color/text_color_primary"
+            android:textSize="15sp" />
+
+    </org.autojs.autojs.theme.widget.ThemeColorTextInputLayout>
+
+    <!-- 行内错误提示 -->
+    <TextView
+        android:id="@+id/mgmt_login_error"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:textColor="@color/mgmt_color_error"
+        android:textSize="12sp"
+        android:visibility="gone" />
+
+    <!-- 连接中进度条 (登录测试期间显示, 替代抽屉行内转圈) -->
+    <ProgressBar
+        android:id="@+id/mgmt_login_progress"
+        style="?android:attr/progressBarStyleHorizontal"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="10dp"
+        android:indeterminate="true"
+        android:indeterminateTint="@color/mgmt_color_brand"
+        android:visibility="gone" />
+
+</LinearLayout>

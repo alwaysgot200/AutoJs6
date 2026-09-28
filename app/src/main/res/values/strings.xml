@@ -172,16 +172,28 @@
     <string name="key_scripts_after_app_restart" translatable="false">key_$_scripts_after_app_restart</string>
     <string name="key_server_address" translatable="false">key_$_server_address</string>
 
-    <!-- @mgmt-hook H8: 管理平台薄层 (org.autojs.autojs.mgmt), key 为固定契约不得改名。 -->
-    <string name="key_management_platform_server_address" translatable="false">key_$_management_platform_server_address</string>
-    <string name="key_management_platform_secret" translatable="false">key_$_management_platform_secret</string>
-    <string name="key_management_platform_test_connection" translatable="false">key_$_management_platform_test_connection</string>
+    <!-- @mgmt-hook H8: 管理平台薄层 (org.autojs.autojs.mgmt)。SP 键字面值是固定契约, 由 MgmtPref 以常量持有。 -->
     <string name="text_management_platform_server_address">Management platform server address</string>
-    <string name="text_management_platform_secret">Management platform secret</string>
-    <string name="text_management_platform_test_connection">Test connection to management platform</string>
-    <string name="text_management_platform_connected">Connected to platform</string>
     <string name="text_management_platform_connection_success">Connection to management platform succeeded</string>
-    <string name="text_management_platform_connection_failed">Connection to management platform failed: %1$s</string>
+    <!-- @mgmt-hook H8/H9: 抽屉「登录」分区与弹窗文案。 -->
+    <string name="mgmt_text_login_group">Login</string>
+    <string name="mgmt_text_login_platform">Log in to platform</string>
+    <string name="mgmt_text_logged_in">Connected</string>
+    <string name="mgmt_dialog_login_title">Management platform</string>
+    <string name="mgmt_dialog_login_subtitle">Log in to remotely manage scripts and devices</string>
+    <string name="mgmt_text_platform_api_key">Platform API key</string>
+    <string name="mgmt_text_api_key_helper">Use the device access code from tenant settings</string>
+    <string name="mgmt_text_login_empty_input">Please fill in server address and platform API key</string>
+    <string name="mgmt_text_login_failed_generic">Connection failed, please check the address and API key</string>
+    <string name="mgmt_dialog_logged_in_subtitle">Connected to management platform</string>
+    <string name="mgmt_text_username">Tenant</string>
+    <string name="mgmt_text_device_id">Device ID</string>
+    <string name="mgmt_text_server">Server</string>
+    <string name="mgmt_text_copy">Copy</string>
+    <string name="mgmt_text_copied">Device ID copied</string>
+    <string name="mgmt_text_close">Close</string>
+    <string name="mgmt_action_logout">Log out</string>
+    <string name="mgmt_text_logged_out">Logged out</string>
     <!-- @custom C1/C2: 二开作者信息入口 + 打包页一键勾选常用权限。 -->
     <string name="url_bilibili_qianruohongchen" translatable="false">https://space.bilibili.com/519965290</string>
     <string name="text_author_qianruohongchen" translatable="false">浅若红尘（哔哩哔哩博主）</string>

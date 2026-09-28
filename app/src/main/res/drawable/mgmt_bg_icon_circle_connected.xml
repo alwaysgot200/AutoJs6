@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- @mgmt-hook H9: 已登录弹窗头部圆形图标底色 (成功绿)。 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="oval">
+    <solid android:color="@color/mgmt_color_connected_container" />
+</shape>

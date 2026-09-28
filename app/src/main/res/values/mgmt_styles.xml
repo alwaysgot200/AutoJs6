@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 薄层自有样式: 宿主主题为 AppCompat, 登录弹窗内的 Material TextInputLayout
+     (OutlinedBox) 运行时要求 MaterialComponents 主题, 用 Bridge 主题仅包裹弹窗视图,
+     不修改官方 AppTheme (见 mgmt_dialog_login.xml)。 -->
+<resources>
+
+    <style name="MgmtThemeMaterialBridge" parent="Theme.MaterialComponents.DayNight.Bridge" />
+
+</resources>
