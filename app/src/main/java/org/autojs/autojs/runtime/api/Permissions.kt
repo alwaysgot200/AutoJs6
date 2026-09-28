@@ -11,6 +11,7 @@ import androidx.lifecycle.Lifecycle
 import org.autojs.autojs.permission.PostNotificationsPermission
 import org.autojs.autojs.util.IntentUtils.startSafely
 import org.autojs.autojs.util.RomUtils
+import java.lang.ref.WeakReference
 import java.util.WeakHashMap
 
 class Permissions(private val context: Context) {
@@ -63,9 +64,15 @@ class Permissions(private val context: Context) {
         /**
          * Cache activity result launchers per activity instance.
          * zh-CN: 按 Activity 实例缓存 ActivityResultLauncher, 避免在 RESUMED 时重复 register 导致崩溃.
+         *
+         * vendor:fix (2026-09-28, LeakCanary 实证): value 必须弱引用。launcher 内部强持有
+         * ActivityResultRegistry → Activity, 原值为强引用时, WeakHashMap 的 value→key 强链
+         * 使条目永远无法被清除, Activity onDestroy 后整个 MainActivity 实例被静态缓存泄漏。
+         * launcher 在注册期间 (ON_CREATE~ON_DESTROY) 被 registry 自身强引用, WeakReference
+         * 不会提前失效; ON_DESTROY 自动解绑后即可随 Activity 一起回收。
          */
         private val requestMultiplePermissionsLauncherCache =
-            WeakHashMap<FragmentActivity, ActivityResultLauncher<Array<String>>>()
+            WeakHashMap<FragmentActivity, WeakReference<ActivityResultLauncher<Array<String>>>>()
 
         /**
          * Register the launcher early (e.g. in Activity.onCreate()).
@@ -87,7 +94,7 @@ class Permissions(private val context: Context) {
                     }
                 }
             }.also { launcher ->
-                requestMultiplePermissionsLauncherCache[activity] = launcher
+                requestMultiplePermissionsLauncherCache[activity] = WeakReference(launcher)
             }
         }
 
@@ -97,7 +104,7 @@ class Permissions(private val context: Context) {
          */
         @JvmStatic
         fun getRegisteredRequestMultiplePermissionsLauncher(activity: FragmentActivity): ActivityResultLauncher<Array<String>>? {
-            return requestMultiplePermissionsLauncherCache[activity]
+            return requestMultiplePermissionsLauncherCache[activity]?.get()
         }
 
         @JvmStatic

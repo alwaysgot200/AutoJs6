@@ -240,8 +240,14 @@ git commit -m "chore: bump AutoJs6 submodule to <短SHA>"
   颜色资源导致 aapt2 链接失败；改用已有的 `console_view_*` 色。
 - `d6f94f06` — `LogBottomSheet.kt` 在 Kotlin 中误用 `AutoJs.getInstance()`（不存在）；
   改为 `AutoJs.instance`（4 处）。
+- 2026-09-28 — `runtime/api/Permissions.kt` 静态
+  `requestMultiplePermissionsLauncherCache` 为 `WeakHashMap<Activity, Launcher>`，
+  但 launcher 强引用 registry→Activity（value→key 强链），条目永不被清除，
+  MainActivity onDestroy 后整实例被静态缓存泄漏（LeakCanary 实证，
+  签名 d4b3ca18…，见代码内 `vendor:fix` 注释）。修补：value 包 `WeakReference`。
+  上游修复方式大概率相同或改为 lifecycle 自动 unregister，届时删除我方补丁。
 
-上游日后修复这两点时，rebase 会直接冲突，届时删除我方补丁即可。
+上游日后修复这几点时，rebase 会直接冲突，届时删除我方补丁即可。
 
 ---
 
