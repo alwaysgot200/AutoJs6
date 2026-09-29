@@ -244,7 +244,13 @@ git commit -m "chore: bump AutoJs6 submodule to <短SHA>"
   `requestMultiplePermissionsLauncherCache` 为 `WeakHashMap<Activity, Launcher>`，
   但 launcher 强引用 registry→Activity（value→key 强链），条目永不被清除，
   MainActivity onDestroy 后整实例被静态缓存泄漏（LeakCanary 实证，
-  签名 d4b3ca18…，见代码内 `vendor:fix` 注释）。修补：value 包 `WeakReference`。
+  签名 d4b3ca18…，见代码内 `vendor:fix` 注释）。
+  **2026-09-29 二次修正**：首版"value 包 `WeakReference`"经 androidx.activity 1.12.2
+  字节码证伪——`ActivityResultRegistry` 字段表不含 launcher（`register()` 创建后直接
+  返回、从不回存），而调用点又丢弃了 register 返回值；弱引用会导致 launcher 被 GC 后，
+  RESUMED 态申请通知权限时抛 `IllegalStateException`。最终修补：**value 恢复强引用 +
+  注册 `DefaultLifecycleObserver` 在 ON_DESTROY 显式移除条目**（观察者随
+  LifecycleRegistry 一同销毁，不引入新静态链）。
   上游修复方式大概率相同或改为 lifecycle 自动 unregister，届时删除我方补丁。
 
 上游日后修复这几点时，rebase 会直接冲突，届时删除我方补丁即可。

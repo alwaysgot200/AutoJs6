@@ -7,11 +7,12 @@ import android.util.Log
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions
 import androidx.fragment.app.FragmentActivity
+import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleOwner
 import org.autojs.autojs.permission.PostNotificationsPermission
 import org.autojs.autojs.util.IntentUtils.startSafely
 import org.autojs.autojs.util.RomUtils
-import java.lang.ref.WeakReference
 import java.util.WeakHashMap
 
 class Permissions(private val context: Context) {
@@ -65,14 +66,23 @@ class Permissions(private val context: Context) {
          * Cache activity result launchers per activity instance.
          * zh-CN: 按 Activity 实例缓存 ActivityResultLauncher, 避免在 RESUMED 时重复 register 导致崩溃.
          *
-         * vendor:fix (2026-09-28, LeakCanary 实证): value 必须弱引用。launcher 内部强持有
-         * ActivityResultRegistry → Activity, 原值为强引用时, WeakHashMap 的 value→key 强链
-         * 使条目永远无法被清除, Activity onDestroy 后整个 MainActivity 实例被静态缓存泄漏。
-         * launcher 在注册期间 (ON_CREATE~ON_DESTROY) 被 registry 自身强引用, WeakReference
-         * 不会提前失效; ON_DESTROY 自动解绑后即可随 Activity 一起回收。
+         * vendor:fix (LeakCanary 实证, 2026-09-29 二次修正):
+         * 上游原值是 `WeakHashMap<Activity, Launcher>` 强 value。launcher 单向强引用
+         * ActivityResultRegistry → Activity (value→key 强链), 条目永不清除,
+         * Activity onDestroy 后整实例被静态缓存泄漏。
+         *
+         * 关键事实 (对 androidx.activity 1.12.2 字节码核实): ActivityResultRegistry
+         * 的字段表不含 launcher——register() 创建 launcher 后直接返回, 从不回存,
+         * 即 registry 不持有 launcher; 而 MainActivity/SettingsActivity 的 onCreate
+         * 又丢弃了 registerForActivityResult 的返回值。因此 value 必须保持强引用,
+         * 绝不能包 WeakReference (上一版修复包成 WeakReference 后, launcher 随时可被
+         * GC, 通知权限申请会走到 RESUMED 态注册分支直接抛 IllegalStateException)。
+         *
+         * 正确防泄漏方式: ON_DESTROY 观察者显式移除条目, 断开 launcher→registry→
+         * Activity 静态强链; 观察者本身随 Activity 的 LifecycleRegistry 一同销毁。
          */
         private val requestMultiplePermissionsLauncherCache =
-            WeakHashMap<FragmentActivity, WeakReference<ActivityResultLauncher<Array<String>>>>()
+            WeakHashMap<FragmentActivity, ActivityResultLauncher<Array<String>>>()
 
         /**
          * Register the launcher early (e.g. in Activity.onCreate()).
@@ -94,7 +104,14 @@ class Permissions(private val context: Context) {
                     }
                 }
             }.also { launcher ->
-                requestMultiplePermissionsLauncherCache[activity] = WeakReference(launcher)
+                requestMultiplePermissionsLauncherCache[activity] = launcher
+                // vendor:fix: 静态缓存的 value 是 launcher 存活的唯一引用, 不能弱引用;
+                // 改在 ON_DESTROY 显式移除条目, 消除 Activity 泄漏 (观察者随 LifecycleRegistry 销毁)。
+                activity.lifecycle.addObserver(object : DefaultLifecycleObserver {
+                    override fun onDestroy(owner: LifecycleOwner) {
+                        requestMultiplePermissionsLauncherCache.remove(activity)
+                    }
+                })
             }
         }
 
@@ -104,7 +121,7 @@ class Permissions(private val context: Context) {
          */
         @JvmStatic
         fun getRegisteredRequestMultiplePermissionsLauncher(activity: FragmentActivity): ActivityResultLauncher<Array<String>>? {
-            return requestMultiplePermissionsLauncherCache[activity]?.get()
+            return requestMultiplePermissionsLauncherCache[activity]
         }
 
         @JvmStatic
