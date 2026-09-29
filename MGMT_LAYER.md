@@ -36,7 +36,10 @@
 ```
 app/src/main/java/org/autojs/autojs/mgmt/
 ├── Mgmt.kt                                         # 唯一门面 object，挂钩只允许调它
-├── client/ManagementPlatformClient.kt              # WS 客户端 + 全部 32 协议处理（~2k 行）
+├── client/ManagementPlatformClient.kt              # WS 客户端 + 全部协议处理（~2k 行）
+├── client/ConnectionState.kt                       # 三态连接状态/原因（弱网加固）
+├── client/NetworkReachabilityMonitor.kt            # 本机网络可达性监听（弱网加固）
+├── client/OutboxManager.kt                         # 上行终态消息持久化发件箱（§5/方案 §5.3）
 ├── service/ManagementPlatformService.kt            # dataSync 前台服务，保活 + 承载连接
 ├── script/ManagementPlatformScriptExecutionListener.kt  # 脚本运行事件 -> SCRIPT_STATUS_UPDATE
 ├── pref/MgmtPref.kt                                 # 平台地址/秘钥/登录态开关读写（默认 SP）
@@ -140,24 +143,37 @@ force-stop 后由非 Launcher 入口唤起时 `mAllowStartForeground=false`，
 
 ---
 
-## 5. 协议契约（一字未改，服务端事实来源 `apps/server/src/module/device/`）
+## 5. 协议契约（服务端事实来源 `apps/server/src/module/device/`）
+
+> 2026-09-29 起以**追加可选字段/新增消息类型**方式向后兼容扩展（弱网方案 §5.3/§6.1），
+> 既有 30 种消息的语义与字段一字未改；旧 APK 不带 msgId 时服务端完全按旧路径处理。
 
 设备端出站 12 种：`DEVICE_INFO`、`HEARTBEAT`、`CAPABILITIES`、`COMMAND_RESULT`、
 `SCRIPT_LIST`、`INSTALLED_APPS`、`RUNNING_SCRIPTS`、`SCHEDULED_SCRIPTS`、
 `SCRIPT_CONTENT`、`LOG_LINES`、`SCREENSHOT`、`SCRIPT_STATUS_UPDATE`。
 
-设备端入站 18 种（`ManagementPlatformClient` when 块）：
+设备端入站 19 种（`ManagementPlatformClient` when 块）：
 `AUTH_OK`、`AUTH_FAILED`、`REQUEST_SCRIPT_LIST`、`PUSH_SCRIPT`、`RUN_SCRIPT`、
 `REQUEST_SCREENSHOT`、`TOUCH_EVENT`、`DEVICE_ACTION`、`REQUEST_RUNNING_SCRIPTS`、
 `REQUEST_SCHEDULED_SCRIPTS`、`REQUEST_INSTALLED_APPS`、`REQUEST_LOG_TAIL`、
 `REQUEST_SCRIPT_CONTENT`、`UPDATE_SCRIPT_CONTENT`、`DELETE_SCRIPT`、`CREATE_FOLDER`、
-`CREATE_INTENT_TASK`、`CREATE_TIMED_TASK`、`DELETE_SCHEDULED_TASK`、`INSTALL_APK`。
+`CREATE_INTENT_TASK`、`CREATE_TIMED_TASK`、`DELETE_SCHEDULED_TASK`、`INSTALL_APK`、
+`MESSAGE_ACK`。
 
 - 鉴权：HTTP 升级后服务端按 `matchCode` 校验租户，成功回 `AUTH_OK`，失败回
   `AUTH_FAILED`（业务码 4001）并关闭连接。
 - `AUTH_OK` 负载：`{ tenantId, tenantName? }`。`tenantName`（租户公司名）为 2026-09-28
   **追加的可选字段**，仅用于抽屉「已登录」弹窗展示；旧客户端忽略未知字段，旧服务端不下发时
   客户端回落展示 `tenantId`，双向向后兼容，不改变鉴权语义与消息类型集合。
+- **上行幂等扩展（2026-09-29，方案 §5.3/§6.1）**：仅终态/回执类出站消息
+  （`SCRIPT_STATUS_UPDATE`、`COMMAND_RESULT`、`LOG_LINES`）在信封顶层追加
+  `msgId`（32 位十六进制 UUID）；客户端先落盘 outbox
+  （`mgmt/client/OutboxManager.kt`，文件 `filesDir/mgmt/upstream_outbox.json`，
+  上限 500 条/1MiB，媒体帧与 HEARTBEAT 不入队），AUTH_OK 后按 FIFO 限速重放；
+  服务端 Redis `SET NX EX 600` 去重，首帧处理后回
+  `{ type:'MESSAGE_ACK', payload:{ msgId, duplicate } }`，重复帧只回 ACK 不再落库；
+  客户端凭 ACK 删条目，ACK 丢失则下次重连重放、由服务端去重兜底；退出登录清空 outbox，
+  禁止跨账号/跨租户重放。msgId 缺失（旧 APK）时服务端跳过去重，行为与旧版一致。
 - 客户端重试策略：普通网络故障 2s 起指数退避（上限 60s、±25% 抖动）；
   **鉴权失败固定 60s 慢重试**（`AUTH_FAIL_RETRY_SECONDS=60`），避免错误接入码刷服务端。
 - 截图为二进制媒体帧（okio ByteString），触摸坐标基于截图宽高比由设备端映射到物理分辨率。

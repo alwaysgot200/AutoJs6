@@ -163,6 +163,11 @@ object ManagementPlatformClient {
     private fun onAuthenticated() {
         cancelStatusEscalation()
         publishStatus(ConnectionStatus(ConnectionState.CONNECTED, ConnectionIssue.NONE, 0, false))
+        // 鉴权通过后再重放 outbox（而非 onOpen）: 服务端去重窗口以已鉴权连接为准,
+        // 鉴权失败的测试连接不会投送任何积压消息。
+        OutboxManager.flush { envelope ->
+            runCatching { webSocket?.send(envelope) == true }.getOrDefault(false)
+        }
     }
 
     /**
@@ -490,6 +495,8 @@ object ManagementPlatformClient {
         lastConnectKey = null
         tenantId = null
         tenantName = null
+        // 清空 outbox: 积压消息不得跨账号/跨租户重放（防越权数据泄漏, 方案 §5.3）
+        OutboxManager.clear()
         val ws = webSocket
         webSocket = null
         runCatching { ws?.close(1000, "user logout") }
@@ -847,11 +854,22 @@ object ManagementPlatformClient {
     }
 
     fun send(type: String, payload: JSONObject) {
-        val ws = webSocket ?: return
-        val obj = JSONObject()
-        obj.put("type", type)
-        obj.put("payload", payload)
-        ws.send(obj.toString())
+        // 终态/回执/日志类消息先持久化进 outbox（信封顶层带 msgId, 方案 §5.3/§6.1）:
+        // 即使随后 ws 不可用或发送后 ACK 丢失, 下次 AUTH_OK 会按序重放, 服务端幂等去重;
+        // 非关键消息（心跳/全量同步/截图文本等）维持原语义, 不排队。
+        val text = if (OutboxManager.isDurable(type)) {
+            OutboxManager.enqueue(type, payload)
+        } else {
+            JSONObject().put("type", type).put("payload", payload).toString()
+        }
+        val ws = webSocket
+        if (ws == null) {
+            // 未连接: 关键消息已在 outbox 等待重放, 非关键消息按旧行为直接丢弃。
+            return
+        }
+        runCatching { ws.send(text) }.onFailure {
+            Log.w(TAG, "ws send failed ($type); durable message waits for replay", it)
+        }
     }
 
      /**
@@ -945,6 +963,11 @@ object ManagementPlatformClient {
                     tenantId = payload.optString("tenantId").takeIf { it.isNotEmpty() }
                     tenantName = payload.optString("tenantName").takeIf { it.isNotEmpty() }
                     onAuthenticated()
+                }
+                "MESSAGE_ACK" -> {
+                    // 上行消息服务端处理确认（方案 §6.1）: 从 outbox 删除对应条目。
+                    // duplicate=true 表示重放帧被去重, 同样代表服务端已处理过, 正常清理。
+                    OutboxManager.acknowledge(payload.optString("msgId"))
                 }
                 "AUTH_FAILED" -> {
                     Log.w(TAG, "AUTH_FAILED: ${payload.optString("message")}")
