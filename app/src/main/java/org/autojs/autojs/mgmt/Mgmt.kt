@@ -9,6 +9,7 @@ import android.os.Looper
 import android.util.Log
 import org.autojs.autojs.engine.ScriptEngineService
 import org.autojs.autojs.mgmt.client.ManagementPlatformClient
+import org.autojs.autojs.mgmt.client.NetworkReachabilityMonitor
 import org.autojs.autojs.mgmt.perm.MgmtPermissionRequester
 import org.autojs.autojs.mgmt.pref.MgmtPref
 import org.autojs.autojs.mgmt.script.ManagementPlatformScriptExecutionListener
@@ -47,6 +48,13 @@ object Mgmt {
     @JvmStatic
     fun bootstrap(application: Application) {
         MgmtPermissionRequester.register(application)
+        // 本机网络恢复即时重连 (回调内部自行吞异常, 绝不拖垮宿主启动流程)。
+        runCatching {
+            NetworkReachabilityMonitor.start(
+                application,
+                ManagementPlatformClient::onLocalNetworkStateChanged,
+            )
+        }
         tryStartManagementService(application, attempt = 0)
     }
 

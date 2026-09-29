@@ -9,6 +9,8 @@ import androidx.recyclerview.widget.RecyclerView
 import com.afollestad.materialdialogs.DialogAction
 import com.afollestad.materialdialogs.MaterialDialog
 import org.autojs.autojs.mgmt.Mgmt
+import org.autojs.autojs.mgmt.client.ConnectionState
+import org.autojs.autojs.mgmt.client.ConnectionStatus
 import org.autojs.autojs.mgmt.client.ManagementPlatformClient
 import org.autojs.autojs.mgmt.pref.MgmtPref
 import org.autojs.autojs.ui.main.drawer.DrawerMenuGroup
@@ -57,8 +59,8 @@ object MgmtPlatformLoginMenu {
 
     init {
         // Client 保证回调 post 到主线程。
-        ManagementPlatformClient.addConnectionStateListener { connected ->
-            render(connected)
+        ManagementPlatformClient.addConnectionStateListener { newStatus ->
+            render(newStatus)
         }
     }
 
@@ -85,7 +87,7 @@ object MgmtPlatformLoginMenu {
             }
         }
         weakItem = WeakReference(item)
-        renderItem(item, ManagementPlatformClient.isConnected)
+        renderItem(item, ManagementPlatformClient.status)
 
         return buildList {
             add(DrawerMenuGroup(R.string.mgmt_text_login_group))
@@ -113,9 +115,9 @@ object MgmtPlatformLoginMenu {
         })
     }
 
-    private fun render(connected: Boolean) {
+    private fun render(newStatus: ConnectionStatus) {
         val item = weakItem.get() ?: return
-        renderItem(item, connected)
+        renderItem(item, newStatus)
         val holder = weakHolder.get() ?: return
         refreshHolder(holder)
     }
@@ -128,14 +130,21 @@ object MgmtPlatformLoginMenu {
         }
     }
 
-    private fun renderItem(item: LoginDrawerItem, connected: Boolean) {
+    private fun renderItem(item: LoginDrawerItem, newStatus: ConnectionStatus) {
+        val connected = newStatus.state == ConnectionState.CONNECTED
         item.displayTitleRes = if (connected) {
             R.string.mgmt_text_logged_in
         } else {
             R.string.mgmt_text_login_platform
         }
-        // 已登录时副标题展示当前服务器; 未登录不显示。行内进度条永不启用 (进度在登录弹窗内展示)。
-        item.subtitle = if (connected) MgmtPref.serverAddress.trim() else null
+        // 已连接: 副标题展示当前服务器; 重连中: 轻提示"正在自动重连"; 未登录不显示。
+        item.subtitle = when {
+            connected -> MgmtPref.serverAddress.trim()
+            newStatus.state == ConnectionState.RECOVERING ->
+                org.autojs.autojs.app.GlobalAppContext.get()
+                    .getString(R.string.mgmt_text_recovering)
+            else -> null
+        }
         item.isProgress = false
     }
 
@@ -150,7 +159,7 @@ object MgmtPlatformLoginMenu {
         // 从未配置过地址时, 后台线程获取 WiFi 网关作为建议值 (WifiService binder,
         // 严禁主线程调用), 回到主线程时仅在用户尚未输入的情况下预填。
         if (MgmtPref.serverAddress.isEmpty()) {
-            Thread {
+            Thread({
                 val gateway = runCatching {
                     org.autojs.autojs.util.NetworkUtils.getGatewayAddress()
                 }.getOrNull()?.takeIf { it.isNotEmpty() && it != "0.0.0.0" }
@@ -161,7 +170,7 @@ object MgmtPlatformLoginMenu {
                         }
                     }
                 }
-            }.start()
+            }, "mgmt-gateway-suggest").apply { isDaemon = true }.start()
         }
         binding.mgmtLoginError.visibility = View.GONE
 

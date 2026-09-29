@@ -73,11 +73,11 @@ object ManagementPlatformClient {
     private const val TAG = "ManagementPlatformClient"
 
     /**
-     * 正式连接状态监听器 (设置页按钮文案据此实时切换)。
-     * 回调统一 post 到主线程, 调用方无需自行切线程。
+     * 连接状态监听器 (三态, 2026-09-29 跨境弱网优化):
+     * 回调统一 post 到主线程, 调用方无需自行切线程; 注册即回放当前状态。
      */
     fun interface ConnectionStateListener {
-        fun onConnectionStateChanged(connected: Boolean)
+        fun onConnectionStateChanged(status: ConnectionStatus)
     }
 
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -87,9 +87,25 @@ object ManagementPlatformClient {
      * 正式长连接是否已通过服务端鉴权 (收到 AUTH_OK)。
      * 注意: TCP/WS 握手成功 (onOpen) 不算已连接, 必须等应用层 AUTH_OK。
      */
+    val isConnected: Boolean
+        get() = status.state == ConnectionState.CONNECTED
+
+    /**
+     * 当前连接状态快照 (三态 + 原因 + 次数 + 是否升级提示)。
+     */
     @Volatile
-    var isConnected: Boolean = false
+    var status: ConnectionStatus = ConnectionStatus.INITIAL
         private set
+
+    /**
+     * 提示升级调度任务: 进入 RECOVERING 后分别在 [QUIET_WINDOW_MS] 与 [ESCALATE_DISCONNECT_MS]
+     * 触发——前者允许展示"自动重连中", 后者升级为 DISCONNECTED 并给出具体原因文案。
+     */
+    @Volatile
+    private var quietWindowFuture: ScheduledFuture<*>? = null
+
+    @Volatile
+    private var escalateFuture: ScheduledFuture<*>? = null
 
     /**
      * 最近一次 AUTH_OK 携带的租户标识/名称。tenantName 为服务端 2026-09-28 起追加的可选字段,
@@ -118,28 +134,181 @@ object ManagementPlatformClient {
             }
         }
         // 注册即回放当前状态, 避免 UI 先订阅后等事件
-        mainHandler.post { listener.onConnectionStateChanged(isConnected) }
+        mainHandler.post { listener.onConnectionStateChanged(status) }
     }
 
     fun removeConnectionStateListener(listener: ConnectionStateListener) {
         synchronized(connectionListeners) { connectionListeners.remove(listener) }
     }
 
-    private fun setConnected(connected: Boolean) {
-        if (isConnected == connected) return
-        isConnected = connected
+    /**
+     * 发布新状态 (无变化则跳过), 并把回调统一 post 到主线程, 单个监听器异常不影响其余订阅者。
+     * 持对象锁串行化: 状态发布来自 OkHttp 回调线程、scheduler 线程、网络 binder 线程,
+     * 不串行化会出现"已恢复 CONNECTED 之后又被并发的升级任务刷回 DISCONNECTED"的乱序。
+     */
+    @Synchronized
+    private fun publishStatus(newStatus: ConnectionStatus) {
+        if (status == newStatus) return
+        status = newStatus
         val snapshot = synchronized(connectionListeners) { connectionListeners.toList() }
         mainHandler.post {
-            snapshot.forEach { runCatching { it.onConnectionStateChanged(connected) } }
+            snapshot.forEach { runCatching { it.onConnectionStateChanged(newStatus) } }
         }
+    }
+
+    /**
+     * 鉴权成功 (AUTH_OK): 进入 CONNECTED, 取消所有提示升级任务, 归零计数。
+     */
+    @Synchronized
+    private fun onAuthenticated() {
+        cancelStatusEscalation()
+        publishStatus(ConnectionStatus(ConnectionState.CONNECTED, ConnectionIssue.NONE, 0, false))
+    }
+
+    /**
+     * 复位为安静的未连接态 (用户退出/配置失效), 取消提示升级链。
+     */
+    @Synchronized
+    private fun resetDisconnected() {
+        cancelStatusEscalation()
+        publishStatus(
+            ConnectionStatus(ConnectionState.DISCONNECTED, ConnectionIssue.NONE, 0, false),
+        )
+    }
+
+    /**
+     * 检测到连接断开 (onFailure/onClosed):
+     * - 若此前为 CONNECTED: 进入 RECOVERING (安静), 并武装两个提示升级任务;
+     * - 若已在 RECOVERING/DISCONNECTED (重试又失败): 不改变状态、不重建升级任务,
+     *   DISCONNECTED 下保持原因文案稳定, 避免提示随每次重试来回翻转。
+     */
+    @Synchronized
+    private fun onConnectionLost() {
+        if (status.state == ConnectionState.CONNECTED) {
+            enterRecovering(alreadyEscalated = false)
+        }
+    }
+
+    /**
+     * 进入重连中状态并武装提示升级链:
+     * 安静窗口 [QUIET_WINDOW_MS] 内对用户完全静默; 超时仍未恢复则允许展示"自动重连中";
+     * 再过 [ESCALATE_DISCONNECT_MS] 仍未恢复则升级为 DISCONNECTED + 具体原因。
+     */
+    @Synchronized
+    private fun enterRecovering(alreadyEscalated: Boolean) {
+        cancelStatusEscalation()
+        if (alreadyEscalated) {
+            // 由"已升级提示"态发起的新一轮尝试 (如网络恢复触发即时重连):
+            // 保持提示可见但不重建安静窗口, 避免提示闪烁; 若本次尝试长时间未成功,
+            // 兜底落回 DISCONNECTED 保持文案稳定。
+            publishStatus(
+                ConnectionStatus(ConnectionState.RECOVERING, currentIssue(), reconnectAttempts, true),
+            )
+            escalateFuture = scheduler.schedule({
+                // 与 onAuthenticated 持同一把锁复检: 任务可能恰好在 AUTH_OK 到达时触发,
+                // cancel(false) 无法中断已开始执行的任务, 必须在锁内确认状态未翻转。
+                synchronized(this) {
+                    if (status.state == ConnectionState.RECOVERING) {
+                        publishStatus(
+                            ConnectionStatus(
+                                ConnectionState.DISCONNECTED,
+                                currentIssue(),
+                                reconnectAttempts,
+                                true,
+                            ),
+                        )
+                    }
+                }
+            }, RE_ESCALATE_AFTER_MS, TimeUnit.MILLISECONDS)
+            return
+        }
+        publishStatus(
+            ConnectionStatus(ConnectionState.RECOVERING, ConnectionIssue.NONE, reconnectAttempts, false),
+        )
+        quietWindowFuture = scheduler.schedule({
+            synchronized(this) {
+                if (status.state == ConnectionState.RECOVERING && !status.escalated) {
+                    publishStatus(status.copy(escalated = true))
+                }
+            }
+        }, QUIET_WINDOW_MS, TimeUnit.MILLISECONDS)
+        escalateFuture = scheduler.schedule({
+            synchronized(this) {
+                if (status.state == ConnectionState.RECOVERING) {
+                    publishStatus(
+                        ConnectionStatus(
+                            ConnectionState.DISCONNECTED,
+                            currentIssue(),
+                            reconnectAttempts,
+                            true,
+                        ),
+                    )
+                }
+            }
+        }, QUIET_WINDOW_MS + ESCALATE_DISCONNECT_MS, TimeUnit.MILLISECONDS)
+    }
+
+    private fun cancelStatusEscalation() {
+        quietWindowFuture?.cancel(false)
+        quietWindowFuture = null
+        escalateFuture?.cancel(false)
+        escalateFuture = null
+    }
+
+    /**
+     * 评估当前中断原因: 本机无网优先, 其次鉴权拒绝, 最后视为服务器不可达。
+     */
+    private fun currentIssue(): ConnectionIssue = when {
+        !NetworkReachabilityMonitor.currentlyOnline() -> ConnectionIssue.LOCAL_NETWORK_LOST
+        authRejected -> ConnectionIssue.AUTH_REJECTED
+        else -> ConnectionIssue.SERVER_UNREACHABLE
+    }
+
+    /**
+     * 本机网络状态变化回调 (NetworkReachabilityMonitor):
+     * - 网络恢复且当前未连接: 取消退避任务, 立即发起重连 (恢复延迟 P95 目标 ≤5s);
+     * - 网络丢失且当前已处于升级提示态: 按最新原因刷新文案。
+     */
+    @JvmStatic
+    @Synchronized
+    fun onLocalNetworkStateChanged(online: Boolean) {
+        if (online) {
+            if (status.state != ConnectionState.CONNECTED) {
+                immediateReconnect()
+            }
+        } else if (status.escalated && status.issue != ConnectionIssue.LOCAL_NETWORK_LOST) {
+            publishStatus(status.copy(issue = ConnectionIssue.LOCAL_NETWORK_LOST))
+        }
+    }
+
+    /**
+     * 绕过幂等守卫立即重连: 先取消待执行的退避任务 (否则 connect() 的
+     * "pending future" 守卫会把本次调用自己挡掉), 再走标准 connect 流程。
+     */
+    @Synchronized
+    private fun immediateReconnect() {
+        val address = MgmtPref.serverAddress.trim()
+        val secret = MgmtPref.secret.trim()
+        if (address.isEmpty() || secret.isEmpty() || !MgmtPref.sessionEnabled) {
+            return
+        }
+        reconnectFuture?.cancel(false)
+        reconnectFuture = null
+        Log.i(TAG, "local network available, reconnecting immediately")
+        connect(address)
     }
 
     private val appContext get() = GlobalAppContext.get()
 
     // pingInterval: 让 OkHttp 每 20s 发 WebSocket 协议层 ping,
     // NAT 静默断网/拔网线时无 TCP 事件, 靠它快速发现死连接 (配合服务端 120s 心跳超时)
+    // connectTimeout: 跨境高 RTT 下握手兜底; readTimeout=0: WS 存活只靠 ping/心跳,
+    // 不被读取超时误杀; retryOnConnectionFailure: 握手阶段瞬时故障自动重试。
     private val httpClient: OkHttpClient = OkHttpClient.Builder()
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(0, TimeUnit.SECONDS)
         .pingInterval(20, TimeUnit.SECONDS)
+        .retryOnConnectionFailure(true)
         .build()
 
     private val scheduler: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor()
@@ -150,6 +319,16 @@ object ManagementPlatformClient {
      */
     private val rootExecutor: ExecutorService = Executors.newCachedThreadPool { r ->
         Thread(r, "mgmt-root-exec").apply { isDaemon = true }
+    }
+
+    /**
+     * APK 下载/安装专用单线程 (2026-09-29 弱网加固):
+     * INSTALL_APK 含跨境同步 HTTP 下载 (数十 MB) 与 `pm install` 等待, 此前跑在
+     * [scheduler] 上会阻塞心跳/退避/状态升级所有定时任务——下载期间心跳停发,
+     * 设备会被服务端 120s 超时判死且无法即时重连。独立线程隔离, 与连接生命周期解耦。
+     */
+    private val installExecutor: ExecutorService = Executors.newSingleThreadExecutor { r ->
+        Thread(r, "mgmt-apk-install").apply { isDaemon = true }
     }
 
     /**
@@ -223,6 +402,16 @@ object ManagementPlatformClient {
     private const val AUTH_FAIL_RETRY_SECONDS = 60L
     private const val MAX_BACKOFF_SECONDS = 60L
 
+    // 断线后的"安静窗口": 此期间多数跨境抖动可自愈, 对用户完全静默。
+    private const val QUIET_WINDOW_MS = 10_000L
+
+    // 安静窗口结束后再过多久仍未恢复, 就升级为 DISCONNECTED 并展示具体原因
+    // (即断线后 30s: 10s 静默 + 20s "自动重连中")。
+    private const val ESCALATE_DISCONNECT_MS = 20_000L
+
+    // 已升级提示态下发起新连接尝试后, 多久仍未成功则兜底落回 DISCONNECTED。
+    private const val RE_ESCALATE_AFTER_MS = 30_000L
+
     private data class ScriptLogRange(var startIndex: Int, var endIndex: Int? = null)
 
     private const val GLOBAL_LOG_ID = "__ALL__"
@@ -272,12 +461,13 @@ object ManagementPlatformClient {
             "请在设备上操作：系统设置 → 应用 → AutoJs6 → 权限 → 文件/媒体(所有文件访问)；" +
             "已连接 adb 时可执行：adb shell appops set org.autojs.autojs6 MANAGE_EXTERNAL_STORAGE allow"
 
+    @Synchronized
     fun connectIfConfigured() {
         val address = MgmtPref.serverAddress.trim()
         val secret = MgmtPref.secret.trim()
         if (address.isEmpty() || secret.isEmpty() || !MgmtPref.sessionEnabled) {
-            // 配置不完整, 或用户已退出登录 (凭证保留但不自动上线): 立即翻转 UI 状态
-            setConnected(false)
+            // 配置不完整, 或用户已退出登录 (凭证保留但不自动上线): 复位为安静的未连接态
+            resetDisconnected()
             return
         }
         connect(address)
@@ -303,7 +493,7 @@ object ManagementPlatformClient {
         val ws = webSocket
         webSocket = null
         runCatching { ws?.close(1000, "user logout") }
-        setConnected(false)
+        resetDisconnected()
         Log.i(TAG, "user logged out from management platform")
     }
 
@@ -324,9 +514,10 @@ object ManagementPlatformClient {
 
         val url = buildWebSocketUrl(address)
         val request = Request.Builder().url(url).build()
-        // 新连接建立期间一律视为未连接, 直到收到 AUTH_OK 再翻回 (重连时通常本就是 false)
-        setConnected(false)
+        // 新连接建立期间一律视为 RECOVERING, 直到收到 AUTH_OK; 此前是否已处于升级提示
+        // 决定提示窗口行为 (安静重走 / 保持提示不闪烁), 升级链在此统一武装。
         authRejected = false
+        enterRecovering(alreadyEscalated = status.escalated)
         tenantId = null
         tenantName = null
         selfHealTriedForConnection = false
@@ -334,6 +525,10 @@ object ManagementPlatformClient {
         connectionActive = true
         webSocket = httpClient.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(ws: WebSocket, response: Response) {
+                // 身份守卫: 旧 socket 被 cancel 后的迟到回调 (在大量媒体帧占用分发线程时
+                // 可能晚于新连接事件到达) 不得触碰当前连接, 否则会把新连接的
+                // connectionActive/心跳/CONNECTED 状态全部冲掉并再建一条 socket。
+                if (ws !== webSocket) return
                 Log.d(TAG, "onOpen")
                 reconnectAttempts = 0
                 sendDeviceInfo()
@@ -351,23 +546,26 @@ object ManagementPlatformClient {
             }
 
             override fun onClosed(ws: WebSocket, code: Int, reason: String) {
+                if (ws !== webSocket) return
                 Log.d(TAG, "onClosed: $code $reason")
                 connectionActive = false
                 stopHeartbeat()
-                setConnected(false)
+                onConnectionLost()
                 // 4001 = 接入码无效, 慢速重试 (用户可能正在修改秘钥, 改完会主动触发 connect)
                 scheduleReconnect(code == 4001 || authRejected)
             }
 
             override fun onFailure(ws: WebSocket, t: Throwable, response: Response?) {
+                if (ws !== webSocket) return
                 Log.w(TAG, "onFailure", t)
                 connectionActive = false
                 stopHeartbeat()
-                setConnected(false)
+                onConnectionLost()
                 scheduleReconnect(response?.code == 4001 || authRejected)
             }
 
             override fun onMessage(ws: WebSocket, text: String) {
+                if (ws !== webSocket) return
                 handleServerMessage(text)
             }
         })
@@ -435,7 +633,9 @@ object ManagementPlatformClient {
     private fun startHeartbeat() {
         heartbeatFuture?.cancel(false)
         heartbeatFuture = scheduler.scheduleAtFixedRate(
-            { sendHeartbeat() },
+            // scheduleAtFixedRate 任务体一旦抛出未捕获异常, 后续周期会被静默永久取消
+            // (心跳静默停摆, 设备将被服务端超时判死且无任何日志); 单次失败必须吞掉。
+            { runCatching { sendHeartbeat() }.onFailure { Log.w(TAG, "heartbeat failed", it) } },
             5L, // initial delay in seconds
             15L, // heartbeat interval in seconds
             TimeUnit.SECONDS,
@@ -610,6 +810,7 @@ object ManagementPlatformClient {
      * - 鉴权失败 4001: 固定 60s, 避免错误接入码每几秒刷一次服务端;
      * - 每次重试都重新读 Pref, 用户改完地址/秘钥后下一次重连即生效。
      */
+    @Synchronized
     private fun scheduleReconnect(authFailed: Boolean = false) {
         val address = MgmtPref.serverAddress.trim()
         val secret = MgmtPref.secret.trim()
@@ -743,12 +944,16 @@ object ManagementPlatformClient {
                     Log.d(TAG, "AUTH_OK, connected to platform")
                     tenantId = payload.optString("tenantId").takeIf { it.isNotEmpty() }
                     tenantName = payload.optString("tenantName").takeIf { it.isNotEmpty() }
-                    setConnected(true)
+                    onAuthenticated()
                 }
                 "AUTH_FAILED" -> {
                     Log.w(TAG, "AUTH_FAILED: ${payload.optString("message")}")
                     authRejected = true
-                    setConnected(false)
+                    // 已处于升级提示态时立即刷新为"秘钥无效"原因; 安静窗口内则
+                    // 由 30s 升级任务经 currentIssue() 自动带出, 不打扰短抖动场景。
+                    if (status.escalated && status.issue != ConnectionIssue.AUTH_REJECTED) {
+                        publishStatus(status.copy(issue = ConnectionIssue.AUTH_REJECTED))
+                    }
                 }
                 "REQUEST_SCRIPT_LIST" -> sendScriptListSafe()
                 "PUSH_SCRIPT" -> handlePushScript(payload)
@@ -1166,7 +1371,9 @@ object ManagementPlatformClient {
 
         val mode = payload.optString("mode", "auto")
 
-        scheduler.execute {
+        // 下载与安装可能持续数分钟, 必须在专用 installExecutor 执行, 严禁占用 scheduler
+        // (单线程, 承载心跳/退避重连/状态升级定时任务)。
+        installExecutor.execute {
             try {
                 val address = MgmtPref.serverAddress.trim()
                 if (address.isEmpty()) {
@@ -1248,9 +1455,19 @@ object ManagementPlatformClient {
         return try {
             val cmd = "pm install -r \"${'$'}{file.absolutePath}\""
             val process = Runtime.getRuntime().exec(arrayOf("su", "-c", cmd))
-            val code = process.waitFor()
-            Log.d(TAG, "pm install exit code=$code")
-            code == 0
+            // waitFor 本身无超时, 与 execRoot 同样放到 rootExecutor 并加 120s 上限,
+            // 防止 root 授权弹窗无人响应/pm 卡死时长时间占住安装线程。
+            val future = rootExecutor.submit(Callable { process.waitFor() })
+            try {
+                val code = future.get(120, TimeUnit.SECONDS)
+                Log.d(TAG, "pm install exit code=$code")
+                code == 0
+            } catch (e: Exception) {
+                future.cancel(true)
+                runCatching { process.destroy() }
+                Log.w(TAG, "installApkWithRoot timeout after 120s: ${file.name}")
+                false
+            }
         } catch (e: Throwable) {
             Log.w(TAG, "installApkWithRoot failed", e)
             false

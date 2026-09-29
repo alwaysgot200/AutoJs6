@@ -194,6 +194,14 @@
     <string name="mgmt_text_close">Close</string>
     <string name="mgmt_action_logout">Log out</string>
     <string name="mgmt_text_logged_out">Logged out</string>
+    <string name="mgmt_text_recovering">Reconnecting automatically…</string>
+    <!-- @mgmt-hook H8: 连接状态常驻通知 (安静窗口内只展示 default, 不打扰)。 -->
+    <string name="mgmt_notif_title">AutoJs6 Management Service</string>
+    <string name="mgmt_notif_default">Keeping connection to the management platform</string>
+    <string name="mgmt_notif_recovering">Network unstable. Reconnecting automatically, no action needed.</string>
+    <string name="mgmt_notif_local_lost">Device network disconnected. Will reconnect automatically once it returns.</string>
+    <string name="mgmt_notif_server_unreachable">Cannot reach the server. Continued automatic retries are running.</string>
+    <string name="mgmt_notif_auth_rejected">Invalid access key. Tap to log in again.</string>
     <!-- @custom C1/C2: 二开作者信息入口 + 打包页一键勾选常用权限。 -->
     <string name="url_bilibili_qianruohongchen" translatable="false">https://space.bilibili.com/519965290</string>
     <string name="text_author_qianruohongchen" translatable="false">浅若红尘（哔哩哔哩博主）</string>
