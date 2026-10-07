@@ -17,14 +17,14 @@
 **薄层做什么**
 
 - WebSocket 长连接、鉴权、心跳、断线退避重连；
-- 32 种消息协议（见 §5）、截图二进制媒体帧、触摸/手势注入、系统动作；
+- 34 种消息协议（见 §5）、截图二进制媒体帧、触摸/手势注入、系统动作、远程停止脚本；
 - 脚本仓库查询/推送/增删改、运行与运行态上报、定时/广播任务、APK 安装；
 - 前台服务保活、运行时权限申请；
 - 左侧抽屉最前「登录」分区（设置页不再保留平台入口）：未登录弹窗填写地址/API Key 登录（弹窗回填上次凭证、行内进度与错误提示）；已登录弹窗展示租户名/设备 ID/服务器并可退出登录（退出保留凭证但不自动重连）。
 
 **明确不做**（避免与上游耦合、便于升级）
 
-- 不改 32 种消息协议、不加 MQTT、不做协议信封改造；
+- 不改既有消息协议的语义与字段（新增消息类型仅允许追加，见 §5）、不加 MQTT、不做协议信封改造；
 - 不拆分 god class（`ManagementPlatformClient` 保持单文件，本期不拆，降低协议搬迁风险）；
 - 不引入第二套网络库/JSON 库/依赖注入；不新增第三方依赖（okhttp/okio 上游已有）；
 - 不修改上游 `Pref.kt`、`MainActivity.kt`（零修改红线，升级冲突最小化）。
@@ -152,13 +152,22 @@ force-stop 后由非 Launcher 入口唤起时 `mAllowStartForeground=false`，
 `SCRIPT_LIST`、`INSTALLED_APPS`、`RUNNING_SCRIPTS`、`SCHEDULED_SCRIPTS`、
 `SCRIPT_CONTENT`、`LOG_LINES`、`SCREENSHOT`、`SCRIPT_STATUS_UPDATE`。
 
-设备端入站 19 种（`ManagementPlatformClient` when 块）：
+设备端入站 22 种（`ManagementPlatformClient` when 块）：
 `AUTH_OK`、`AUTH_FAILED`、`REQUEST_SCRIPT_LIST`、`PUSH_SCRIPT`、`RUN_SCRIPT`、
+`STOP_SCRIPT`、
 `REQUEST_SCREENSHOT`、`TOUCH_EVENT`、`DEVICE_ACTION`、`REQUEST_RUNNING_SCRIPTS`、
 `REQUEST_SCHEDULED_SCRIPTS`、`REQUEST_INSTALLED_APPS`、`REQUEST_LOG_TAIL`、
 `REQUEST_SCRIPT_CONTENT`、`UPDATE_SCRIPT_CONTENT`、`DELETE_SCRIPT`、`CREATE_FOLDER`、
 `CREATE_INTENT_TASK`、`CREATE_TIMED_TASK`、`DELETE_SCHEDULED_TASK`、`INSTALL_APK`、
 `MESSAGE_ACK`。
+
+- **`STOP_SCRIPT`（2026-10-07 追加，群控工作台群停止/单台停止共用）**：入站
+  `{ commandId?, scriptId }`；`scriptId` 为空串时调用
+  `ScriptEngineService.stopAll()` 停止设备全部脚本引擎；非空（设备端脚本绝对路径）时
+  遍历 `scriptExecutions`，按 `source.fullPath` 匹配并逐个 `engine.destroy()`
+  （支持同脚本多开）；结果经 `COMMAND_RESULT` 回执（无运行实例回失败并带中文原因）。
+  支持该指令的客户端在 `CAPABILITIES`/`HEARTBEAT` 能力快照中上报 `stopScript:true`，
+  旧客户端缺省该位时服务端前置拦截（错误码 7011），不静默超时。
 
 - 鉴权：HTTP 升级后服务端按 `matchCode` 校验租户，成功回 `AUTH_OK`，失败回
   `AUTH_FAILED`（业务码 4001）并关闭连接。
@@ -293,7 +302,9 @@ git commit -m "chore: bump AutoJs6 submodule to <短SHA>"
   `REQUEST_SCRIPT_CONTENT`、`UPDATE_SCRIPT_CONTENT`。
 
 待补：真机（无 root）一轮；`CREATE_TIMED_TASK/CREATE_INTENT_TASK/DELETE_SCHEDULED_TASK`、
-`INSTALL_APK`（需平台先上传 APK 包）为低频链路，协议与已验证链路同构。
+`INSTALL_APK`（需平台先上传 APK 包）为低频链路，协议与已验证链路同构；
+`STOP_SCRIPT`（2026-10-07 新增：空 scriptId 全停 / 指定路径精确停 / COMMAND_RESULT 回执 /
+能力位 stopScript 上报）本轮以双 flavor 构建验证，设备侧运行冒烟待补。
 
 已知非缺陷现象：模拟器冷启动 JIT/dex 校验风暴偶发系统 ANR 弹窗（主线程卡在
 LocaleManager binder，与薄层无关），点等待/二次启动即恢复，真机预期无此问题；

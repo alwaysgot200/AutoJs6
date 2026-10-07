@@ -681,6 +681,8 @@ object ManagementPlatformClient {
             },
         )
         caps.put("root", rootAvailable)
+        // mgmt STOP_SCRIPT 协议（停止指定路径脚本或全部引擎）自本版本起支持
+        caps.put("stopScript", true)
         return caps
     }
 
@@ -981,6 +983,7 @@ object ManagementPlatformClient {
                 "REQUEST_SCRIPT_LIST" -> sendScriptListSafe()
                 "PUSH_SCRIPT" -> handlePushScript(payload)
                 "RUN_SCRIPT" -> handleRunScript(payload)
+                "STOP_SCRIPT" -> handleStopScript(payload)
                 "REQUEST_SCREENSHOT" -> handleRequestScreenshot(payload)
                 "TOUCH_EVENT" -> handleTouchEvent(payload)
                 "DEVICE_ACTION" -> handleDeviceAction(payload)
@@ -1209,6 +1212,42 @@ object ManagementPlatformClient {
             org.autojs.autojs.model.script.Scripts.run(context, file)
         } catch (e: Exception) {
             Log.w(TAG, "Failed to run script: $path", e)
+        }
+    }
+
+    /**
+     * mgmt STOP_SCRIPT 指令（群控工作台"停止全部"与单台停止共用）:
+     * - scriptId 为空: 停止设备上全部脚本引擎（ScriptEngineService.stopAll）;
+     * - scriptId 非空（设备端绝对路径）: 仅停止 source.fullPath 匹配的运行实例（可能多开，逐个 destroy）。
+     */
+    private fun handleStopScript(payload: JSONObject) {
+        val commandId = payload.optString("commandId")
+        val scriptId = payload.optString("scriptId")
+        try {
+            val service = AutoJs.instance.scriptEngineService
+            if (scriptId.isEmpty()) {
+                val stopped = service.stopAll()
+                replyCommandResult(commandId, true, "已停止 $stopped 个运行中的脚本")
+                return
+            }
+            // 复制快照后再 destroy，避免引擎销毁并发修改 scriptExecutions 集合
+            var stopped = 0
+            for (execution in service.scriptExecutions.toList()) {
+                val source = execution.source
+                val fullPath = if (source is ScriptSource) source.fullPath else source.toString()
+                if (fullPath == scriptId) {
+                    execution.engine.destroy()
+                    stopped += 1
+                }
+            }
+            if (stopped == 0) {
+                replyCommandResult(commandId, false, "没有正在运行的脚本：$scriptId")
+            } else {
+                replyCommandResult(commandId, true, "已停止 $stopped 个脚本实例")
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to stop script: $scriptId", e)
+            replyCommandResult(commandId, false, "停止脚本失败：${e.message}")
         }
     }
 
