@@ -31,6 +31,9 @@ import java.nio.ByteOrder
 import org.autojs.autojs.AutoJs
 import org.autojs.autojs.app.GlobalAppContext
 import org.autojs.autojs.core.accessibility.AccessibilityService as AutoJsAccessibilityService
+import org.autojs.autojs.mgmt.auth.AccountSession
+import org.autojs.autojs.mgmt.config.MgmtServerConfig
+import org.autojs.autojs.mgmt.core.DeviceFingerprint
 import org.autojs.autojs.mgmt.pref.MgmtPref
 import org.autojs.autojs.execution.ExecutionConfig
 import org.autojs.autojs.execution.ScriptExecution
@@ -292,15 +295,13 @@ object ManagementPlatformClient {
      */
     @Synchronized
     private fun immediateReconnect() {
-        val address = MgmtPref.serverAddress.trim()
-        val secret = MgmtPref.secret.trim()
-        if (address.isEmpty() || secret.isEmpty() || !MgmtPref.sessionEnabled) {
+        if (!connectionAllowed()) {
             return
         }
         reconnectFuture?.cancel(false)
         reconnectFuture = null
         Log.i(TAG, "local network available, reconnecting immediately")
-        connect(address)
+        connect(MgmtServerConfig.serverBaseUrl())
     }
 
     private val appContext get() = GlobalAppContext.get()
@@ -400,6 +401,16 @@ object ManagementPlatformClient {
     @Volatile
     private var connectionActive: Boolean = false
 
+    /**
+     * 用户级连接开关 (仅内存, 不持久化), 账号化改造 (方案 §7.1):
+     * - 进程启动默认放行: 已登录会话由 bootstrap → FGS 自动上线 (含重启免登录);
+     * - 用户在抽屉点「断开连接」置 false: 只影响本次进程会话, 立即取消重连并关 WS,
+     *   但账号会话保留; 下次点「连接设备」([userConnect]) 或重启进程后恢复自动上线;
+     * - [logout] 同样置 false (进程内未重新登录前不得自动上线)。
+     */
+    @Volatile
+    private var connectEnabledByUser: Boolean = true
+
     @Volatile
     private var lastConnectKey: String? = null
 
@@ -466,27 +477,72 @@ object ManagementPlatformClient {
             "请在设备上操作：系统设置 → 应用 → AutoJs6 → 权限 → 文件/媒体(所有文件访问)；" +
             "已连接 adb 时可执行：adb shell appops set org.autojs.autojs6 MANAGE_EXTERNAL_STORAGE allow"
 
+    /**
+     * 统一的自动连接门禁: 账号会话存在 (JWT 已恢复/登录) + 租户接入码就绪 +
+     * 用户本次会话未手动断开。地址恒由 [MgmtServerConfig] 按构建环境解析。
+     */
+    private fun connectionAllowed(): Boolean =
+        connectEnabledByUser &&
+            AccountSession.isLoggedIn &&
+            MgmtPref.secret.trim().isNotEmpty()
+
+    /**
+     * 用户本次进程会话是否允许连接 (手动断开为 false, 新进程默认 true)。
+     * 供 FGS 在 START_STICKY 重建时决定是否应继续存活, 避免手动断开后残留僵尸通知。
+     */
+    fun isConnectionEnabledByUser(): Boolean = connectEnabledByUser
+
     @Synchronized
     fun connectIfConfigured() {
-        val address = MgmtPref.serverAddress.trim()
-        val secret = MgmtPref.secret.trim()
-        if (address.isEmpty() || secret.isEmpty() || !MgmtPref.sessionEnabled) {
-            // 配置不完整, 或用户已退出登录 (凭证保留但不自动上线): 复位为安静的未连接态
+        if (!connectionAllowed()) {
+            // 未登录 / 无接入码 / 用户已手动断开或退出: 复位为安静的未连接态
             resetDisconnected()
             return
         }
-        connect(address)
+        connect(MgmtServerConfig.serverBaseUrl())
+    }
+
+    /**
+     * 用户点「连接设备」: 放开本次进程会话的连接开关后走标准建连流程。
+     * 调用方 (Mgmt 门面) 负责在接入码缺失时先补拉并确保前台服务已拉起。
+     */
+    @Synchronized
+    fun userConnect() {
+        connectEnabledByUser = true
+        connectIfConfigured()
+    }
+
+    /**
+     * 用户点「断开连接」(方案 §7.1: 连接与会话独立):
+     * 取消退避重连/心跳并关闭 WebSocket, 但**保留**账号登录态与租户展示信息
+     * (同账号再次连接时无需重登); 不清除任何持久化凭证。
+     * 与 [logout] 的区别: 不清 outbox/不丢租户信息, 进程重启即自动恢复在线。
+     */
+    @Synchronized
+    fun userDisconnect() {
+        connectEnabledByUser = false
+        reconnectFuture?.cancel(false)
+        reconnectFuture = null
+        stopHeartbeat()
+        connectionActive = false
+        lastConnectKey = null
+        val ws = webSocket
+        webSocket = null
+        runCatching { ws?.close(1000, "user disconnect") }
+        resetDisconnected()
+        Log.i(TAG, "device disconnected by user (account session kept)")
     }
 
     /**
      * 用户主动退出登录: 取消退避重连/心跳, 关闭 WebSocket, 清空鉴权展示信息并翻转 UI。
      *
-     * 调用方 (Mgmt 门面) 必须**先**把 MgmtPref.sessionEnabled 置为 false (地址/秘钥可保留
-     * 供登录弹窗回填)、再停止前台服务: close 触发的 onClosed 会走 scheduleReconnect,
-     * 开关为 false 使其立即跳过; 否则 START_STICKY 服务下次被系统重建时会再次上线。
+     * 调用方 (Mgmt 门面) 必须先经 AccountSession 清除账号凭证 (JWT/接入码) 再调本方法、
+     * 随后停止前台服务: close 触发的 onClosed 会走 scheduleReconnect, [connectionAllowed]
+     * 为 false 使其立即跳过; 否则 START_STICKY 服务下次被系统重建时会再次上线。
      */
     @Synchronized
     fun logout() {
+        connectEnabledByUser = false
         reconnectFuture?.cancel(false)
         reconnectFuture = null
         stopHeartbeat()
@@ -821,9 +877,7 @@ object ManagementPlatformClient {
      */
     @Synchronized
     private fun scheduleReconnect(authFailed: Boolean = false) {
-        val address = MgmtPref.serverAddress.trim()
-        val secret = MgmtPref.secret.trim()
-        if (address.isEmpty() || secret.isEmpty() || !MgmtPref.sessionEnabled) {
+        if (!connectionAllowed()) {
             return
         }
         reconnectFuture?.cancel(false)
@@ -2351,29 +2405,13 @@ object ManagementPlatformClient {
         }
     }
 
-    private val deviceIdLock = Any()
-
-    @Volatile
-    private var cachedDeviceId: String? = null
-
     /**
-     * 设备稳定标识: 直接读 Settings.Secure.ANDROID_ID 并缓存。
+     * 设备稳定标识: 统一委托 [DeviceFingerprint] (Settings.Secure.ANDROID_ID, 进程内缓存),
+     * 保证 WS deviceId 与市场下载核销 X-Device-Id 同源同值 (方案 §10.2-8)。
      *
      * 禁止用 `Device(appContext).androidId` 实现: runtime.api.Device 构造时会同步调用
      * TelephonyManager.getImei / getSerial 两个 binder, 在抽屉行点击/弹窗打开等主线程路径上
-     * 实测可阻塞 5s+ 触发系统 ANR (2026-09-28 模拟器堆栈实证); 且 deviceId 在渲染/建链/
-     * 心跳路径高频调用, 构造开销会被放大。ANDROID_ID 首读即可, 缺失回落机型名。
+     * 实测可阻塞 5s+ 触发系统 ANR (2026-09-28 模拟器堆栈实证)。
      */
-    fun deviceId(): String {
-        cachedDeviceId?.let { return it }
-        synchronized(deviceIdLock) {
-            cachedDeviceId?.let { return it }
-            val id = Settings.Secure.getString(appContext.contentResolver, Settings.Secure.ANDROID_ID)
-                ?.takeIf { it.isNotEmpty() }
-                ?: Build.MODEL?.takeIf { it.isNotEmpty() }
-                ?: "unknown"
-            cachedDeviceId = id
-            return id
-        }
-    }
+    fun deviceId(): String = DeviceFingerprint.get()
 }

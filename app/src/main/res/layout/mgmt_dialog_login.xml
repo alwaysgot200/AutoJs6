@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- @mgmt-hook H9: 抽屉「登录平台」弹窗 (头部 + 服务器地址 / 平台 API Key + 行内错误与连接进度)。 -->
+<!-- @mgmt-hook H9: 抽屉账号登录弹窗 (头部 + 账号 / 密码 / 图形验证码 + 行内错误与登录进度)。
+     P1 集成市场地基: 用户只填账号密码, 服务器地址/接入码均由服务端自动下发, 不在表单出现。 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
@@ -19,9 +20,9 @@
             android:layout_width="46dp"
             android:layout_height="46dp"
             android:background="@drawable/mgmt_bg_icon_circle"
-            android:padding="11dp"
             android:contentDescription="@null"
-            android:src="@drawable/mgmt_ic_login"
+            android:padding="11dp"
+            android:src="@drawable/mgmt_ic_person"
             app:tint="@color/mgmt_color_brand" />
 
         <LinearLayout
@@ -34,7 +35,7 @@
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="@string/mgmt_dialog_login_title"
+                android:text="@string/mgmt_dialog_account_login_title"
                 android:textColor="@color/text_color_primary"
                 android:textSize="18sp"
                 android:textStyle="bold" />
@@ -43,7 +44,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="2dp"
-                android:text="@string/mgmt_dialog_login_subtitle"
+                android:text="@string/mgmt_dialog_account_login_subtitle"
                 android:textColor="@color/mgmt_color_text_secondary"
                 android:textSize="13sp" />
 
@@ -51,9 +52,9 @@
 
     </LinearLayout>
 
-    <!-- 服务器地址 -->
+    <!-- 账号 -->
     <org.autojs.autojs.theme.widget.ThemeColorTextInputLayout
-        android:id="@+id/mgmt_server_address_layout"
+        android:id="@+id/mgmt_username_layout"
         style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -63,17 +64,17 @@
         app:boxCornerRadiusTopEnd="10dp"
         app:boxCornerRadiusTopStart="10dp"
         app:hintEnabled="true"
-        app:startIconDrawable="@drawable/mgmt_ic_server">
+        app:startIconDrawable="@drawable/mgmt_ic_person">
 
         <com.google.android.material.textfield.TextInputEditText
-            android:id="@+id/mgmt_server_address"
+            android:id="@+id/mgmt_username"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:autofillHints="@string/text_management_platform_server_address"
-            android:hint="@string/text_management_platform_server_address"
+            android:autofillHints="username"
+            android:hint="@string/mgmt_text_login_username"
             android:imeOptions="actionNext"
             android:importantForAutofill="yes"
-            android:inputType="textUri"
+            android:inputType="text"
             android:maxLines="1"
             android:singleLine="true"
             android:textColor="@color/text_color_primary"
@@ -81,9 +82,9 @@
 
     </org.autojs.autojs.theme.widget.ThemeColorTextInputLayout>
 
-    <!-- 平台 API Key (眼睛图标切换明文/密文) -->
+    <!-- 密码 (眼睛图标切换明文/密文) -->
     <org.autojs.autojs.theme.widget.ThemeColorTextInputLayout
-        android:id="@+id/mgmt_api_key_layout"
+        android:id="@+id/mgmt_password_layout"
         style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -93,26 +94,71 @@
         app:boxCornerRadiusTopEnd="10dp"
         app:boxCornerRadiusTopStart="10dp"
         app:endIconMode="password_toggle"
-        app:helperText="@string/mgmt_text_api_key_helper"
-        app:helperTextTextColor="@color/mgmt_color_text_secondary"
         app:hintEnabled="true"
         app:startIconDrawable="@drawable/mgmt_ic_key">
 
         <com.google.android.material.textfield.TextInputEditText
-            android:id="@+id/mgmt_api_key"
+            android:id="@+id/mgmt_password"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:autofillHints="@string/mgmt_text_platform_api_key"
-            android:hint="@string/mgmt_text_platform_api_key"
-            android:imeOptions="actionDone"
+            android:autofillHints="password"
+            android:hint="@string/mgmt_text_login_password"
+            android:imeOptions="actionNext"
             android:importantForAutofill="yes"
-            android:inputType="textVisiblePassword"
+            android:inputType="textPassword"
             android:maxLines="1"
             android:singleLine="true"
             android:textColor="@color/text_color_primary"
             android:textSize="15sp" />
 
     </org.autojs.autojs.theme.widget.ThemeColorTextInputLayout>
+
+    <!-- 图形验证码: 输入框 + 可点击刷新的验证码图 (服务端开关关闭时整体隐藏) -->
+    <LinearLayout
+        android:id="@+id/mgmt_captcha_row"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <org.autojs.autojs.theme.widget.ThemeColorTextInputLayout
+            android:id="@+id/mgmt_captcha_layout"
+            style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            app:boxCornerRadiusBottomEnd="10dp"
+            app:boxCornerRadiusBottomStart="10dp"
+            app:boxCornerRadiusTopEnd="10dp"
+            app:boxCornerRadiusTopStart="10dp"
+            app:hintEnabled="true"
+            app:startIconDrawable="@drawable/mgmt_ic_login">
+
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/mgmt_captcha"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:hint="@string/mgmt_text_captcha"
+                android:imeOptions="actionDone"
+                android:inputType="text"
+                android:maxLines="1"
+                android:singleLine="true"
+                android:textColor="@color/text_color_primary"
+                android:textSize="15sp" />
+
+        </org.autojs.autojs.theme.widget.ThemeColorTextInputLayout>
+
+        <WebView
+            android:id="@+id/mgmt_captcha_image"
+            android:layout_width="118dp"
+            android:layout_height="52dp"
+            android:layout_marginStart="10dp"
+            android:background="@drawable/mgmt_bg_info_card"
+            android:contentDescription="@string/mgmt_text_captcha_refresh_hint"
+            android:importantForAutofill="no" />
+
+    </LinearLayout>
 
     <!-- 行内错误提示 -->
     <TextView
@@ -124,7 +170,7 @@
         android:textSize="12sp"
         android:visibility="gone" />
 
-    <!-- 连接中进度条 (登录测试期间显示, 替代抽屉行内转圈) -->
+    <!-- 登录进度条 -->
     <ProgressBar
         android:id="@+id/mgmt_login_progress"
         style="?android:attr/progressBarStyleHorizontal"

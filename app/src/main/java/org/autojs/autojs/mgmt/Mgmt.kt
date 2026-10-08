@@ -3,19 +3,25 @@ package org.autojs.autojs.mgmt
 import android.app.Application
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import org.autojs.autojs.engine.ScriptEngineService
+import org.autojs.autojs.mgmt.auth.AccountSession
+import org.autojs.autojs.mgmt.client.AccessCodeClient
 import org.autojs.autojs.mgmt.client.ManagementPlatformClient
 import org.autojs.autojs.mgmt.client.NetworkReachabilityMonitor
+import org.autojs.autojs.mgmt.config.MgmtServerConfig
 import org.autojs.autojs.mgmt.perm.MgmtPermissionRequester
 import org.autojs.autojs.mgmt.pref.MgmtPref
 import org.autojs.autojs.mgmt.script.ManagementPlatformScriptExecutionListener
 import org.autojs.autojs.mgmt.service.ManagementPlatformService
 import org.autojs.autojs.mgmt.ui.MgmtPlatformLoginMenu
 import org.autojs.autojs.ui.main.drawer.DrawerMenuItem
+import org.autojs.autojs.util.ViewUtils
+import org.autojs.autojs6.R
 
 /**
  * 管理平台薄层唯一门面 (详见 MGMT_LAYER.md)。
@@ -47,6 +53,8 @@ object Mgmt {
      */
     @JvmStatic
     fun bootstrap(application: Application) {
+        // 先恢复账号会话 (Keystore 解密 JWT), 后续 FGS 建连门禁依赖登录态。
+        AccountSession.restore()
         MgmtPermissionRequester.register(application)
         // 本机网络恢复即时重连 (回调内部自行吞异常, 绝不拖垮宿主启动流程)。
         runCatching {
@@ -107,7 +115,7 @@ object Mgmt {
     }
 
     /**
-     * H9: 在官方抽屉菜单最前插入「登录」分区 (group + 单条目), 逻辑见 [MgmtPlatformLoginMenu]。
+     * H9: 在官方抽屉菜单最前插入「账号」分区 (group + 状态化条目), 逻辑见 [MgmtPlatformLoginMenu]。
      */
     @JvmStatic
     fun decorateDrawerMenuItems(items: List<DrawerMenuItem>): List<DrawerMenuItem> =
@@ -131,14 +139,83 @@ object Mgmt {
     }
 
     /**
-     * 退出登录: 先把登录态开关置 false (地址/秘钥保留, 供下次登录弹窗回填),
-     * 再取消重连并关闭 WS、停止前台服务。顺序不可调换, 否则 onClosed 的退避重连
-     * 与 START_STICKY 服务重建会再次上线。
+     * 用户主动「连接设备」(方案 §7.1, 连接与会话独立):
+     * 已登录但接入码缺失/上次拉取失败时先现场调 /device/access-code/mine 补齐,
+     * 随后放开客户端连接开关并拉起前台服务。全部回调均在主线程。
+     */
+    @JvmStatic
+    fun connectDevice(context: Context) {
+        if (!AccountSession.isLoggedIn) {
+            ViewUtils.showToast(context, R.string.mgmt_text_session_expired)
+            return
+        }
+        if (MgmtPref.secret.isNotEmpty()) {
+            ManagementPlatformClient.userConnect()
+            startManagementService(context)
+            return
+        }
+        ViewUtils.showToast(context, R.string.mgmt_text_access_code_fetching)
+        AccountSession.ensureAccessCode { result ->
+            result
+                .onSuccess {
+                    ManagementPlatformClient.userConnect()
+                    startManagementService(context)
+                }
+                .onFailure { err ->
+                    val msg = if (err is AccessCodeClient.AccessCodeException &&
+                        err.bizCode == AccessCodeClient.BIZ_CODE_PLATFORM_UNSUPPORTED
+                    ) {
+                        context.getString(R.string.mgmt_text_access_code_platform)
+                    } else {
+                        context.getString(
+                            R.string.mgmt_text_access_code_failed,
+                            err.message ?: err.javaClass.simpleName,
+                        )
+                    }
+                    ViewUtils.showToast(context, msg, true)
+                }
+        }
+    }
+
+    /**
+     * 用户主动「断开连接」: 只断开 WS/停止前台服务, **不清除登录态** —— 账号保持登录,
+     * 下次「连接设备」或 App 重启 (bootstrap → FGS) 时自动恢复在线。
+     */
+    @JvmStatic
+    fun disconnectDevice(context: Context) {
+        ManagementPlatformClient.userDisconnect()
+        runCatching { context.stopService(Intent(context, ManagementPlatformService::class.java)) }
+    }
+
+    /**
+     * 免费注册唯一通道 (方案 §7.1/A13): APP 内零注册表单、WebView 不加载注册页,
+     * 一律经系统浏览器打开平台注册页 (/admin/register); 一期无 deep link 回跳。
+     */
+    @JvmStatic
+    fun openRegister(context: Context) {
+        runCatching {
+            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(MgmtServerConfig.registerPageUrl()))
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            context.startActivity(intent)
+            ViewUtils.showToast(context, R.string.mgmt_text_register_open_browser)
+        }.onFailure {
+            Log.w(TAG, "open register page failed: ${it.message}")
+            ViewUtils.showToast(context, it.message ?: "open browser failed", true)
+        }
+    }
+
+    /**
+     * 退出登录 (方案 §10.1): 通知服务端拉黑令牌 (最佳努力) → 清除全部本地凭证
+     * (JWT + 租户接入码) → 取消重连并关闭 WS、停止前台服务。
+     * 顺序保证: AccountSession 回调在凭证清理完成后执行, close 触发的 onClosed 因
+     * 连接开关已关而立即跳过重连, START_STICKY 重建服务也因未登录 stopSelf。
      */
     @JvmStatic
     fun logout(context: Context) {
-        MgmtPref.sessionEnabled = false
-        ManagementPlatformClient.logout()
-        runCatching { context.stopService(Intent(context, ManagementPlatformService::class.java)) }
+        AccountSession.logout {
+            ManagementPlatformClient.logout()
+            runCatching { context.stopService(Intent(context, ManagementPlatformService::class.java)) }
+            ViewUtils.showToast(context, R.string.mgmt_text_logged_out)
+        }
     }
 }

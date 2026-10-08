@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- @mgmt-hook H9: 抽屉「断开连接」条目图标 (link 叠加斜杠, 由 ImageView app:tint 统一着色)。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FF000000"
+        android:pathData="M3.9,12c0,-1.71 1.39,-3.1 3.1,-3.1h4V7H7c-2.76,0 -5,2.24 -5,5 0,1.5 0.67,2.84 1.71,3.76l1.06,-1.06C4.29,14.17 3.9,13.14 3.9,12zM17,7h-4v1.9h4c1.71,0 3.1,1.39 3.1,3.1 0,0.84 -0.34,1.6 -0.89,2.15l1.08,1.08C21.35,14.38 22,13.25 22,12c0,-2.76 -2.24,-5 -5,-5zM14.34,10.51l-1.26,1.26 2.69,2.69h0.73c1.08,0 2,-0.67 2.33,-1.61l-4.49,-2.34zM8,13h3.17l-2,-2H7c-0.28,0 -0.5,0.22 -0.5,0.5S6.72,12 7,12h1z" />
+    <path
+        android:strokeColor="#FF000000"
+        android:strokeWidth="1.8"
+        android:pathData="M3.5,3.5 L20.5,20.5" />
+</vector>

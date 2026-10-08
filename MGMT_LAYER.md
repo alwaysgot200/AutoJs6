@@ -36,25 +36,34 @@
 ```
 app/src/main/java/org/autojs/autojs/mgmt/
 ├── Mgmt.kt                                         # 唯一门面 object，挂钩只允许调它
-├── client/ManagementPlatformClient.kt              # WS 客户端 + 全部协议处理（~2k 行）
+├── client/ManagementPlatformClient.kt              # WS 客户端 + 全部协议处理（~2.4k 行）
 ├── client/ConnectionState.kt                       # 三态连接状态/原因（弱网加固）
 ├── client/NetworkReachabilityMonitor.kt            # 本机网络可达性监听（弱网加固）
 ├── client/OutboxManager.kt                         # 上行终态消息持久化发件箱（§5/方案 §5.3）
+├── client/MgmtApiHttp.kt                           # REST 共享 OkHttp/线程池/信封解析（P1 账号化）
+├── client/AccessCodeClient.kt                      # GET /device/access-code/mine 拉本租户 matchCode
 ├── service/ManagementPlatformService.kt            # dataSync 前台服务，保活 + 承载连接
 ├── script/ManagementPlatformScriptExecutionListener.kt  # 脚本运行事件 -> SCRIPT_STATUS_UPDATE
-├── pref/MgmtPref.kt                                 # 平台地址/秘钥/登录态开关读写（默认 SP）
+├── pref/MgmtPref.kt                                 # 平台地址(环境解析)/接入码/登录态开关读写（默认 SP）
 ├── perm/MgmtPermissionRequester.kt                 # 运行时权限申请注册
+├── config/MgmtServerConfig.kt                      # 环境地址解析: release 生产域名常量 / debug 模拟器默认+SP 覆盖
+├── core/DeviceFingerprint.kt                       # 统一设备指纹 ANDROID_ID（WS deviceId 与市场核销同源）
+├── auth/AccountSession.kt                          # 账号会话编排: 登录/持久化/接入码下发/退出 + 三态事件
+├── auth/AccountApiClient.kt                        # /auth/code、/auth/login、/auth/logout（账号密码+图形验证码）
+├── auth/AccountTokenStore.kt                       # JWT AndroidKeyStore AES/GCM 加密 SP 持久化
 └── ui/
-    └── MgmtPlatformLoginMenu.kt                    # 抽屉「登录」分区条目 + 登录/已登录弹窗 (H9)
+    └── MgmtPlatformLoginMenu.kt                    # 抽屉「账号」分区三态状态机 + 账号登录弹窗 (H9, P1)
 ```
 
 薄层自有资源（`mgmt_` 前缀，只增不覆盖）：
 
 - `res/drawable/mgmt_ic_login.xml`：抽屉登录条目图标（vector）；
 - `res/drawable/mgmt_ic_{server,key,person,smartphone,check_circle,content_copy}.xml`：弹窗图标（均为 24dp vector）；
+- `res/drawable/mgmt_ic_person_add.xml`、`mgmt_ic_link.xml`、`mgmt_ic_link_off.xml`：
+  抽屉「免费注册 / 连接设备 / 断开连接」条目图标（P1 账号化）；
 - `res/drawable/mgmt_bg_{icon_circle,icon_circle_connected,info_card}.xml`：弹窗圆标底/信息卡片底；
-- `res/layout/mgmt_dialog_login.xml`：登录表单（头部 + 服务器地址 + 平台 API Key 密文切换 + 行内错误/进度）；
-- `res/layout/mgmt_dialog_logged_in.xml`：已登录信息卡（用户名 / 设备 ID 可复制 / 服务器）；
+- `res/layout/mgmt_dialog_login.xml`：账号登录表单（头部 + 账号 + 密码密文切换 + 图形验证码
+  WebView（点击刷新，服务端开关关闭时整行隐藏）+ 行内错误/进度；**不再含服务器地址/API Key 输入**）；
 - `res/values/mgmt_colors.xml`、`res/values/mgmt_ids.xml`：弹窗色板与视图 tag id；
 - `res/values/mgmt_styles.xml`：`MgmtThemeMaterialBridge`（`Theme.MaterialComponents.DayNight.Bridge`），
   仅用于包裹登录弹窗视图 inflate（宿主 AppTheme 是 AppCompat，OutlinedBox TextInputLayout 运行时
@@ -64,18 +73,28 @@ app/src/main/java/org/autojs/autojs/mgmt/
 
 - 偏好文件：`org.autojs.autojs6_preferences.xml`（PreferenceManager 默认 SP）。
 - 键字面值是**固定契约**（已安装版本依赖这些键，改名会丢用户配置，均由 `MgmtPref` 常量持有）：
-  - `key_$_management_platform_server_address`（Kotlin 源码写 `"\$_"`）：服务器地址；
-  - `key_$_management_platform_secret`：平台 API Key（退出登录后仍保留，用于登录弹窗回填）；
-  - `key_$_management_platform_enabled`：登录态开关（boolean）。false=已退出、不得自动上线；
-    缺键（老版本升级）按"地址+秘钥均非空"推断为 true，避免老用户升级后掉线；
-  - 回落键：`key_$_server_address`（纯字符串读取，无默认值副作用）。
-    **禁止**在 SP getter 默认值里放 `NetworkUtils.getGatewayAddress()`——Kotlin 默认参数立即求值,
-    键存在也会每次执行 WifiService binder；该调用只允许在登录弹窗的后台线程异步预填（见
-    `MgmtPlatformLoginMenu.showLoginDialog`）。
-- WS 接入 URL：`{serverAddress}/ws/device?deviceId=<id>&matchCode=<secret>`。
-- APK 下载 URL：`{serverAddress}/api/apk/files/{fileName}?matchCode=<secret>`。
-- 设备标识 `deviceId()`：直接读 `Settings.Secure.ANDROID_ID` 并**进程内缓存**，缺失回落
-  `Build.MODEL`，与服务端 `device_info.device_id` 对齐。**禁止**经 `runtime.api.Device(context)`
+  - `key_$_management_platform_server_address`（Kotlin 源码写 `"\$_"`）：2026-10-09 P1 起
+    **退化为 debug 手工覆盖键**——生效地址统一由 `config/MgmtServerConfig.kt` 解析：
+    release 恒为生产域名常量 `https://autojs6.80fafa.com`（忽略 SP），debug 默认
+    `http://10.0.2.2:8080`（模拟器经回环访问宿主机 dev nginx 统一入口），SP 非空时覆盖
+    （真机 `adb reverse tcp:8080 tcp:8080` 场景）；
+  - `key_$_management_platform_secret`：租户设备接入码（WS matchCode）。P1 起用户不再手填,
+    账号登录成功后由 `AccessCodeClient` 调 `/device/access-code/mine` 自动写入；
+    **退出登录时连同 JWT 一并清除**（防止换号网络失败时沿用上一租户 matchCode 越权上线）；
+  - `key_$_management_platform_enabled`：登录态开关（boolean），语义等同"账号会话存在"：
+    `AccountSession` 登录/恢复置 true、退出置 false；缺键（老版本升级）一律按未登录处理,
+    需用租户账号重新登录一次（登录后自动拉到与历史值相同的 matchCode，WS 行为不变）；
+  - 回落键：`key_$_server_address`（仅 debug 覆盖读取，无默认值副作用）。
+- 账号 JWT 持久化键（P1 新增，`mgmt_account_*`，AndroidKeyStore AES/GCM 密文，卸载即清）：
+  `mgmt_account_username / mgmt_account_access_token / mgmt_account_refresh_token /
+  mgmt_account_expire_at`。当前服务端 refresh_token 与 access_token 同值且无独立刷新端点,
+  过期后回到登录态（勿臆造 refresh 接口）；注册 APP 内零表单，唯一通道是系统浏览器打开
+  `{serverBase}/admin/register`（一期无 deep link 回跳）。
+- WS 接入 URL：`{serverBase}/ws/device?deviceId=<id>&matchCode=<secret>`。
+- APK 下载 URL：`{serverBase}/api/apk/files/{fileName}?matchCode=<secret>`。
+- 设备标识统一收敛到 `core/DeviceFingerprint.kt`：直接读 `Settings.Secure.ANDROID_ID` 并
+  **进程内缓存**，缺失回落 `Build.MODEL`，与服务端 `device_info.device_id` 及市场下载核销
+  `X-Device-Id` 同源同值。**禁止**经 `runtime.api.Device(context)`
   取 androidId——其构造同步调 `TelephonyManager.getImei/getSerial` binder；抽屉行渲染/弹窗在主线程,
   叠加 SP getter 内的 dhcpInfo binder，2026-09-28 实测在模拟器上阻塞主线程 5.3s 触发系统 ANR
   （/data/anr 堆栈实证）。`Device(appContext)` 仅允许出现在 WS 线程的设备动作处理中。
@@ -94,7 +113,7 @@ app/src/main/java/org/autojs/autojs/mgmt/
 | H4 | `.../core/accessibility/AccessibilityService.kt` | L161-162、L173-174（+import L14） | `onDestroy` / `onServiceConnected` 各调一次 `Mgmt.onAccessibilityStateChanged()`（注意：清单中实际绑定服务是 `AccessibilityServiceUsher`） |
 | H5 | `.../external/receiver/BaseBroadcastReceiver.java` | L30-35（+import L11） | try/catch 包裹 `Mgmt.connectIfConfigured()`，广播唤起不得因薄层崩溃 |
 | H8 | `res/values/strings.xml`、`res/values-zh/strings.xml` | 搜 `@mgmt-hook H8` | 薄层文案（`text_management_platform_*` / `mgmt_text_*`，仅追加；条目以 strings 实际内容为准） |
-| H9 | `.../ui/main/drawer/DrawerFragment.kt` | `initMenuItems()` 内 adapter 构造行（+import） | 一行委托：`DrawerMenuAdapter(Mgmt.decorateDrawerMenuItems(items).filterNot { it.isHidden })`，在菜单最前插入「登录」分区（group + 单条目），逻辑全部在 `mgmt/ui/MgmtPlatformLoginMenu.kt` |
+| H9 | `.../ui/main/drawer/DrawerFragment.kt` | `initMenuItems()` 内 adapter 构造行（+import） | 一行委托：`DrawerMenuAdapter(Mgmt.decorateDrawerMenuItems(items).filterNot { it.isHidden })`，在菜单最前插入「账号」分区。P1 起为三态状态机（未登录：登录/免费注册；已登录未连接：连接设备/退出登录；已连接：断开连接/退出登录），含账号密码+图形验证码登录弹窗；逻辑全部在 `mgmt/ui/MgmtPlatformLoginMenu.kt`（adapter 活列表 mgmt 段原地增删刷新，挂钩行本身不变） |
 
 > 编号 H6 保留未用（历史方案中曾规划、后取消）；H7 为旧设置页入口（地址/秘钥/测试连接
 > 三个 Preference），2026-09-28 起被抽屉「登录」分区整体替代，官方
@@ -310,3 +329,21 @@ git commit -m "chore: bump AutoJs6 submodule to <短SHA>"
 LocaleManager binder，与薄层无关），点等待/二次启动即恢复，真机预期无此问题；
 脚本内主动 `exit()` 会令引擎抛 `ScriptInterruptedException`，运行事件记为 error
 （日志中脚本实际正常「运行结束」），属引擎既有行为。
+
+### 9.1 P1 账号化地基（2026-10-09，集成市场方案 §7/§10.1，双 flavor 构建通过）
+
+本轮双 flavor（`:app:assembleAppDebug` / `:app:assembleInrtDebug`）编译/资源链接通过；
+设备侧运行冒烟待模拟器执行，验收剧本（A13）：
+
+- 未登录抽屉仅「登录 / 免费注册」两行；点注册**只**拉起系统浏览器打开
+  `{serverBase}/admin/register`，APP 内无注册表单/无 WebView 注册页；
+- 登录弹窗 = 账号 + 密码 + 图形验证码（点击图片刷新；服务端关验证码时整行隐藏），
+  调 `/api/v1/auth/login`；登录成功后自动 `/device/access-code/mine` 下发 matchCode
+  并 FGS 上线（副标题 账号名·在线）；平台超管登录明确 toast 7018 文案、不静默失败；
+- 已登录未连接：「连接设备」（接入码缺失现场补拉重试）/「退出登录」；
+  已连接：「断开连接」（只断 WS 不掉登录，FGS 通知同步消失）/「退出登录」；
+- 进程重启（force-stop 后桌面启动）：JWT 经 AndroidKeyStore 解密恢复，免登录自动上线；
+  退出登录清全部凭证（`mgmt_account_*` 密文 + secret 键 + enabled=false），不自动重连；
+- SP 两字面值键逐字符不变；地址 release 恒为 `https://autojs6.80fafa.com`，
+  debug 默认 `http://10.0.2.2:8080`（真机 `adb reverse` 后可用原键覆盖）；
+- 挂钩自检：H9 委托行未改，白名单外官方文件零改动（本轮无新挂钩点）。

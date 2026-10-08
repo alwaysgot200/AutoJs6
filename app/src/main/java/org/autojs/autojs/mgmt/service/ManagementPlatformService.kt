@@ -9,6 +9,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.IBinder
+import org.autojs.autojs.mgmt.auth.AccountSession
 import org.autojs.autojs.mgmt.client.ConnectionIssue
 import org.autojs.autojs.mgmt.client.ConnectionState
 import org.autojs.autojs.mgmt.client.ConnectionStatus
@@ -137,9 +138,11 @@ class ManagementPlatformService : Service() {
     }
 
     private fun hasValidConfig(): Boolean {
-        val address = MgmtPref.serverAddress.trim()
-        val secret = MgmtPref.secret.trim()
-        // 用户已退出登录时即使凭证保留也不得自动上线 (服务随即 stopSelf, 不滞留通知栏)。
-        return address.isNotEmpty() && secret.isNotEmpty() && MgmtPref.sessionEnabled
+        // 账号会话存在 (JWT 已恢复/登录) 且租户接入码就绪才允许 FGS 存活建连;
+        // 地址由 MgmtServerConfig 按构建环境保证非空, 不再作为门禁条件。
+        // 用户退出登录/手动断开后服务随即 stopSelf, 不滞留通知栏。
+        return AccountSession.isLoggedIn &&
+            MgmtPref.secret.trim().isNotEmpty() &&
+            ManagementPlatformClient.isConnectionEnabledByUser()
     }
 }
