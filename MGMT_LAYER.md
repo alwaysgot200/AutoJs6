@@ -347,3 +347,36 @@ LocaleManager binder，与薄层无关），点等待/二次启动即恢复，�
 - SP 两字面值键逐字符不变；地址 release 恒为 `https://autojs6.80fafa.com`，
   debug 默认 `http://10.0.2.2:8080`（真机 `adb reverse` 后可用原键覆盖）；
 - 挂钩自检：H9 委托行未改，白名单外官方文件零改动（本轮无新挂钩点）。
+
+---
+
+## 10. P3 脚本市场薄层（2026-10-10 追加，无新挂钩点）
+
+市场为「WebView 容器 + REST 下载 + 本地安装」薄层，全部为 mgmt 自有新文件，
+官方文件仅在既有白名单锚点**追加条目**（H1 Manifest 追加 Activity、H8 strings 追加字符串、
+H9 抽屉条目由 mgmt 自有 `MgmtPlatformLoginMenu.buildItems()` 追加，未新增挂钩点）：
+
+```
+mgmt/
+├── client/MarketApiClient.kt          # GET /market/download/:id（带 JWT/X-Device-Id），
+│                                      # 响应头元数据 + 流式落盘 + SHA-256/size 校验
+├── script/MarketProjectLayout.kt      # 工程包 zip 预检（zip-slip/.so 白名单/炸弹防护）+ 解压
+├── script/MarketScriptInstaller.kt    # SINGLE 单文件 / PROJECT 工程包安装到工作目录 market/<slug>/
+└── ui/market/
+    ├── MarketActivity.kt              # 双 tab WebView（脚本市场/技术论坛），@mgmt-hook H1 声明
+    ├── MarketWebBridge.kt             # JS 桥 MgmtBridge（downloadAndInstall/getToken/...）
+    └── MarketWebClients.kt            # 同源白名单：/admin/login 收口原生登录，外跳系统浏览器
+```
+
+自有资源：`res/layout/mgmt_activity_market.xml`、`res/drawable/mgmt_ic_store.xml`、
+`res/values/mgmt_market_styles.xml`（Mgmt.Market Bridge 主题）、
+`mgmt_action_market` + `mgmt_market_*` 字符串（values/ 与 values-zh/ 双份，均带 @mgmt-hook H8）。
+
+契约要点：
+
+- 安装目录只信下载响应头 `x-install-slug`（服务端稳定短码 `script-<id>`），工程包安装后经
+  `ProjectConfig.fromProjectDir` + main 文件存在性校验再原子替换旧目录；
+- JS 桥 `MgmtBridge.downloadAndInstall(JSON.stringify({scriptId}))` 结果以
+  `window.dispatchEvent(new CustomEvent('mgmt:install-result',{detail:{ok,message}}))` 回派；
+- 游客可浏览/下载免费脚本；需要登录的交互（发帖/评论）由门户页引导 /admin/login，
+  客户端拦截该 URL 收口到 P1 原生登录弹窗，登录成功后刷新 WebView。

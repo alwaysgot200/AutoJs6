@@ -122,6 +122,30 @@ object Mgmt {
         MgmtPlatformLoginMenu.decorate(items)
 
     /**
+     * 打开脚本市场容器 (方案 §10.1, P3): 双 tab WebView (脚本市场/技术论坛)。
+     * 市场浏览/免费下载无需登录; 未登录互动由 MarketActivity 内部收口到原生登录。
+     */
+    @JvmStatic
+    fun openMarket(context: Context) {
+        runCatching {
+            val intent = Intent(context, org.autojs.autojs.mgmt.ui.market.MarketActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            context.startActivity(intent)
+        }.onFailure {
+            Log.w(TAG, "open market failed: ${it.message}")
+            ViewUtils.showToast(context, it.message ?: "open market failed", true)
+        }
+    }
+
+    /**
+     * 唤起原生账号登录弹窗 (P1 既有弹窗, P3 供市场 WebView 拦截 /admin/login 时复用)。
+     */
+    @JvmStatic
+    fun showLoginDialog(context: Context) {
+        MgmtPlatformLoginMenu.showLoginDialog(context)
+    }
+
+    /**
      * 抽屉登录弹窗测试通过后拉起前台服务建立正式持久连接 (与设置页入口同一行为)。
      */
     @JvmStatic

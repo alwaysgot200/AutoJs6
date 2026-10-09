@@ -430,6 +430,14 @@
             android:exported="false"
             android:foregroundServiceType="dataSync" />
 
+        <!-- @mgmt-hook H1: P3 脚本市场容器 (双 tab WebView, 仅内部启动, 不导出)。 -->
+        <activity
+            android:name="org.autojs.autojs.mgmt.ui.market.MarketActivity"
+            android:exported="false"
+            android:launchMode="singleTop"
+            android:configChanges="orientation|screenSize|keyboardHidden|screenLayout"
+            android:theme="@style/Mgmt.Market" />
+
         <activity android:name="org.autojs.autojs.external.tasker.TaskPrefEditActivity" />
 
         <service

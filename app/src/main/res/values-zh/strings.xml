@@ -1479,6 +1479,16 @@
     <string name="mgmt_text_session_expired">登录已过期，请重新登录</string>
     <string name="mgmt_text_logout_confirm">确定退出账号 %1$s 吗？设备连接将同时断开。</string>
     <string name="mgmt_text_disconnecting">正在断开…</string>
+    <!-- @mgmt-hook H8: P3 脚本市场容器 (抽屉入口/双 tab/WebView 桥/下载安装)。 -->
+    <string name="mgmt_action_market">脚本市场</string>
+    <string name="mgmt_market_tab_scripts">脚本市场</string>
+    <string name="mgmt_market_tab_forum">技术论坛</string>
+    <string name="mgmt_market_download_started">正在下载脚本安装包…</string>
+    <string name="mgmt_market_install_success">已安装到 脚本/%1$s</string>
+    <string name="mgmt_market_install_failed_generic">下载或安装失败</string>
+    <string name="mgmt_market_storage_required">安装脚本需要「所有文件访问」权限，请授权后重新点击安装。</string>
+    <string name="mgmt_market_busy">另一个脚本正在安装，请稍候…</string>
+    <string name="mgmt_market_bad_args">安装请求无效</string>
     <!-- @mgmt-hook H8: 连接状态常驻通知 (安静窗口内只展示 default, 不打扰)。 -->
     <string name="mgmt_notif_title">AutoJs6 管理服务</string>
     <string name="mgmt_notif_default">正在保持与管理平台的连接</string>

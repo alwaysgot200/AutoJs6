@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  @mgmt-hook H8: mgmt 自有资源 (只增不覆盖官方同名资源)。
+  市场容器主题: 宿主 AppTheme 父主题为 AppCompat, 直接 inflate Material TabLayout
+  可能缺 Material 主题属性; Bridge 主题在不改宿主主题的前提下让 Material 组件可用,
+  同时保持 AppCompatActivity 兼容 (与 MgmtThemeMaterialBridge 同思路)。
+-->
+<resources>
+    <style name="Mgmt.Market" parent="Theme.MaterialComponents.DayNight.NoActionBar.Bridge" />
+</resources>

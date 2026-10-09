@@ -67,6 +67,13 @@ object MgmtPlatformLoginMenu {
     // region 三态条目构建
 
     private fun buildItems(): List<DrawerMenuItem> {
+        // 市场入口与登录态无关: 游客也可浏览/下载免费脚本 (方案 §10.2-1), 三态下恒定展示。
+        val marketItem = MgmtMarkerItem(R.drawable.mgmt_ic_store, R.string.mgmt_action_market).apply {
+            setAction { holder ->
+                rememberRecyclerView(holder)
+                Mgmt.openMarket(holder.itemView.context.applicationContext)
+            }
+        }
         if (!AccountSession.isLoggedIn) {
             return listOf(
                 MgmtMarkerItem(R.drawable.mgmt_ic_login, R.string.mgmt_text_account_login).apply {
@@ -82,6 +89,7 @@ object MgmtPlatformLoginMenu {
                         Mgmt.openRegister(holder.itemView.context)
                     }
                 },
+                marketItem,
             )
         }
         val status = ManagementPlatformClient.status
@@ -120,7 +128,7 @@ object MgmtPlatformLoginMenu {
                 confirmLogout(holder.itemView.context)
             }
         }
-        return listOf(primary, logout)
+        return listOf(primary, logout, marketItem)
     }
 
     // endregion
@@ -209,7 +217,8 @@ object MgmtPlatformLoginMenu {
 
     // region 账号登录弹窗 (账号 + 密码 + 图形验证码)
 
-    private fun showLoginDialog(ctx: Context) {
+    @JvmStatic
+    fun showLoginDialog(ctx: Context) {
         // 宿主 AppTheme 为 AppCompat, 弹窗内 OutlinedBox TextInputLayout 需要 MaterialComponents
         // 主题; 用 Bridge 主题仅包裹本视图的 inflate, 不动官方主题。
         val themedCtx = android.view.ContextThemeWrapper(ctx, R.style.MgmtThemeMaterialBridge)
