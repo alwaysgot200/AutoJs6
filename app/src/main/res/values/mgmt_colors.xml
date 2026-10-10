@@ -13,4 +13,6 @@
     <!-- 次级文字 / 信息卡片底 -->
     <color name="mgmt_color_text_secondary">#5F6368</color>
     <color name="mgmt_color_info_container">#F5F7F8</color>
+    <!-- 登录弹窗环境标识: 开发环境琥珀色 (提示非生产), 生产环境复用次级灰色 -->
+    <color name="mgmt_color_env_dev">#B26A00</color>
 </resources>

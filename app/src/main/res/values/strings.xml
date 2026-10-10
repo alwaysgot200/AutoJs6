@@ -224,6 +224,10 @@
     <string name="mgmt_text_session_expired">Session expired, please sign in again</string>
     <string name="mgmt_text_logout_confirm">Log out of account %1$s? The device will be disconnected.</string>
     <string name="mgmt_text_disconnecting">Disconnecting…</string>
+    <!-- @mgmt-hook H8: 登录弹窗环境标识 (release=生产 / debug=开发, 按构建类型 source set 编译)。 -->
+    <string name="mgmt_env_name_production">Production</string>
+    <string name="mgmt_env_name_development">Development</string>
+    <string name="mgmt_text_env_indicator">%1$s · %2$s</string>
     <!-- @mgmt-hook H8: P3 脚本市场容器 (抽屉入口/双 tab/WebView 桥/下载安装)。 -->
     <string name="mgmt_action_market">Marketplace</string>
     <string name="mgmt_market_tab_scripts">Scripts</string>

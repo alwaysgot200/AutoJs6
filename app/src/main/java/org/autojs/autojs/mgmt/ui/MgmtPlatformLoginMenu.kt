@@ -6,6 +6,7 @@ import android.os.Looper
 import android.view.LayoutInflater
 import android.view.View
 import android.webkit.WebView
+import androidx.core.content.ContextCompat
 import androidx.recyclerview.widget.RecyclerView
 import com.afollestad.materialdialogs.DialogAction
 import com.afollestad.materialdialogs.MaterialDialog
@@ -15,6 +16,7 @@ import org.autojs.autojs.mgmt.auth.AccountApiClient
 import org.autojs.autojs.mgmt.auth.AccountSession
 import org.autojs.autojs.mgmt.client.ConnectionState
 import org.autojs.autojs.mgmt.client.ManagementPlatformClient
+import org.autojs.autojs.mgmt.config.MgmtServerConfig
 import org.autojs.autojs.ui.main.drawer.DrawerMenuGroup
 import org.autojs.autojs.ui.main.drawer.DrawerMenuItem
 import org.autojs.autojs.ui.main.drawer.DrawerMenuItemViewHolder
@@ -223,6 +225,23 @@ object MgmtPlatformLoginMenu {
         // 主题; 用 Bridge 主题仅包裹本视图的 inflate, 不动官方主题。
         val themedCtx = android.view.ContextThemeWrapper(ctx, R.style.MgmtThemeMaterialBridge)
         val binding = MgmtDialogLoginBinding.inflate(LayoutInflater.from(themedCtx))
+
+        // 环境标识: release=生产环境(次级灰)/debug=开发环境(琥珀), 后缀显示生效地址;
+        // debug 若存在本机 SP 覆盖, 这里展示的就是覆盖后的真实地址, 防止登错环境。
+        val isProdEnv = MgmtServerConfig.isProduction()
+        binding.mgmtEnvIndicator.text = ctx.getString(
+            R.string.mgmt_text_env_indicator,
+            ctx.getString(
+                if (isProdEnv) R.string.mgmt_env_name_production else R.string.mgmt_env_name_development
+            ),
+            MgmtServerConfig.serverBaseUrl(),
+        )
+        binding.mgmtEnvIndicator.setTextColor(
+            ContextCompat.getColor(
+                ctx,
+                if (isProdEnv) R.color.mgmt_color_text_secondary else R.color.mgmt_color_env_dev
+            )
+        )
 
         // 验证码会话: 服务端开关关闭时不展示输入行, 登录提交空 code/uuid。
         var captchaEnabled = false

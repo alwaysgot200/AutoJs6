@@ -46,7 +46,7 @@ app/src/main/java/org/autojs/autojs/mgmt/
 ├── script/ManagementPlatformScriptExecutionListener.kt  # 脚本运行事件 -> SCRIPT_STATUS_UPDATE
 ├── pref/MgmtPref.kt                                 # 平台地址(环境解析)/接入码/登录态开关读写（默认 SP）
 ├── perm/MgmtPermissionRequester.kt                 # 运行时权限申请注册
-├── config/MgmtServerConfig.kt                      # 环境地址解析: release 生产域名常量 / debug 模拟器默认+SP 覆盖
+├── config/MgmtServerConfig.kt                      # 环境地址解析(主源集): 读构建类型 source set 的 MgmtEnv + debug SP 覆盖
 ├── core/DeviceFingerprint.kt                       # 统一设备指纹 ANDROID_ID（WS deviceId 与市场核销同源）
 ├── auth/AccountSession.kt                          # 账号会话编排: 登录/持久化/接入码下发/退出 + 三态事件
 ├── auth/AccountApiClient.kt                        # /auth/code、/auth/login、/auth/logout（账号密码+图形验证码）
@@ -54,6 +54,23 @@ app/src/main/java/org/autojs/autojs/mgmt/
 └── ui/
     └── MgmtPlatformLoginMenu.kt                    # 抽屉「账号」分区三态状态机 + 账号登录弹窗 (H9, P1)
 ```
+
+构建类型 source set 双实现（同名类 `config/MgmtEnv`，编译期按构建类型二选一，零上游构建文件改动；
+复用上游官方 `app/build.gradle.kts` 已注册的 `src/debug|release/java` 源集，与上游
+`leakcanary/LeakCanarySetup` 同机制；app/inrt 双 flavor 各自的 debug/release 均覆盖）：
+
+```
+app/src/debug/java/org/autojs/autojs/mgmt/config/MgmtEnv.kt     # 开发环境: IS_PRODUCTION=false,
+                                                                 #   DEFAULT_BASE_URL=http://10.0.2.2:8080,
+                                                                 #   ALLOW_LOCAL_OVERRIDE=true
+app/src/release/java/org/autojs/autojs/mgmt/config/MgmtEnv.kt   # 生产环境: IS_PRODUCTION=true,
+                                                                 #   DEFAULT_BASE_URL=https://autojs6.80fafa.com,
+                                                                 #   ALLOW_LOCAL_OVERRIDE=false (CI 发版/预览包均编译此份)
+```
+
+> Git 安全（fork 为公开开源仓库）：两份 `MgmtEnv.kt` 只放非敏感默认值（公开服务域名 /
+> 模拟器通用回环别名），禁止提交本机 LAN IP、内测域名与任何秘钥；真机 `adb reverse` /
+> 局域网联调地址走 debug 专属 SP 覆盖（设备私有存储，天然不入库），release 不读覆盖。
 
 薄层自有资源（`mgmt_` 前缀，只增不覆盖）：
 
@@ -74,10 +91,11 @@ app/src/main/java/org/autojs/autojs/mgmt/
 - 偏好文件：`org.autojs.autojs6_preferences.xml`（PreferenceManager 默认 SP）。
 - 键字面值是**固定契约**（已安装版本依赖这些键，改名会丢用户配置，均由 `MgmtPref` 常量持有）：
   - `key_$_management_platform_server_address`（Kotlin 源码写 `"\$_"`）：2026-10-09 P1 起
-    **退化为 debug 手工覆盖键**——生效地址统一由 `config/MgmtServerConfig.kt` 解析：
-    release 恒为生产域名常量 `https://autojs6.80fafa.com`（忽略 SP），debug 默认
-    `http://10.0.2.2:8080`（模拟器经回环访问宿主机 dev nginx 统一入口），SP 非空时覆盖
-    （真机 `adb reverse tcp:8080 tcp:8080` 场景）；
+    **退化为 debug 手工覆盖键**——生效地址统一由 `config/MgmtServerConfig.kt` 解析，
+    环境常量由构建类型 source set 双实现 `config/MgmtEnv.kt` 编译期注入：
+    release（`src/release`）恒为生产域名 `https://autojs6.80fafa.com` 且 `ALLOW_LOCAL_OVERRIDE=false`
+    （忽略 SP），debug（`src/debug`）默认 `http://10.0.2.2:8080`（模拟器经回环访问宿主机
+    dev nginx 统一入口），SP 非空时覆盖（真机 `adb reverse tcp:8080 tcp:8080` 场景）；
   - `key_$_management_platform_secret`：租户设备接入码（WS matchCode）。P1 起用户不再手填,
     账号登录成功后由 `AccessCodeClient` 调 `/device/access-code/mine` 自动写入；
     **退出登录时连同 JWT 一并清除**（防止换号网络失败时沿用上一租户 matchCode 越权上线）；
