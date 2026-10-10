@@ -103,6 +103,9 @@
     <!-- @mgmt-hook H1: 管理平台薄层前台服务 (Android 14+ 需按类型声明)。 -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 
+    <!-- @mgmt-hook H1: MINIMAL 无障档后台亮屏的全屏意图兜底 (仅追加, 不改既有条目)。 -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+
     <uses-permission
         android:name="android.permission.UNLIMITED_TOASTS"
         tools:ignore="ProtectedPermissions" />
@@ -429,6 +432,15 @@
             android:name="org.autojs.autojs.mgmt.service.ManagementPlatformService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+
+        <!-- @mgmt-hook H1: MINIMAL 无障档唤醒/解锁透明 Activity (仅内部启动, 不导出)。 -->
+        <activity
+            android:name="org.autojs.autojs.mgmt.ui.MgmtWakeUnlockActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:taskAffinity=""
+            android:launchMode="singleInstance"
+            android:theme="@style/Mgmt.WakeUnlock" />
 
         <!-- @mgmt-hook H1: P3 脚本市场容器 (双 tab WebView, 仅内部启动, 不导出)。 -->
         <activity

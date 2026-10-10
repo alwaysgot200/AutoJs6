@@ -242,4 +242,22 @@ object Mgmt {
             ViewUtils.showToast(context, R.string.mgmt_text_logged_out)
         }
     }
+
+    /**
+     * P3: 唤醒/解锁 Activity 已真实创建。
+     *
+     * @returns true=启动 token 有效，Activity 可继续执行并上报；
+     *          false=token 已失败/未知（含薄层自身异常），Activity 须静默退出
+     */
+    @JvmStatic
+    fun onWakeUnlockActivityCreated(launchToken: Int): Boolean =
+        runCatching { ManagementPlatformClient.onWakeUnlockActivityCreated(launchToken) }.getOrDefault(false)
+
+    /**
+     * P3: 唤醒/解锁 Activity 最终结果经门面回报给 client 发 COMMAND_RESULT。
+     */
+    @JvmStatic
+    fun reportWakeUnlockResult(commandId: String?, success: Boolean, message: String?) {
+        runCatching { ManagementPlatformClient.reportWakeUnlockResult(commandId, success, message) }
+    }
 }

@@ -17,7 +17,7 @@
 **薄层做什么**
 
 - WebSocket 长连接、鉴权、心跳、断线退避重连；
-- 34 种消息协议（见 §5）、截图二进制媒体帧、触摸/手势注入、系统动作、远程停止脚本；
+- 36 种消息协议（见 §5）、截图二进制媒体帧、触摸/手势注入、系统动作、远程停止脚本、JPEG 流式自推；
 - 脚本仓库查询/推送/增删改、运行与运行态上报、定时/广播任务、APK 安装；
 - 前台服务保活、运行时权限申请；
 - 左侧抽屉最前「登录」分区（设置页不再保留平台入口）：未登录弹窗填写地址/API Key 登录（弹窗回填上次凭证、行内进度与错误提示）；已登录弹窗展示租户名/设备 ID/服务器并可退出登录（退出保留凭证但不自动重连）。
@@ -36,10 +36,11 @@
 ```
 app/src/main/java/org/autojs/autojs/mgmt/
 ├── Mgmt.kt                                         # 唯一门面 object，挂钩只允许调它
-├── client/ManagementPlatformClient.kt              # WS 客户端 + 全部协议处理（~2.4k 行）
+├── client/ManagementPlatformClient.kt              # WS 客户端 + 全部协议处理（~2.9k 行）
 ├── client/ConnectionState.kt                       # 三态连接状态/原因（弱网加固）
 ├── client/NetworkReachabilityMonitor.kt            # 本机网络可达性监听（弱网加固）
 ├── client/OutboxManager.kt                         # 上行终态消息持久化发件箱（§5/方案 §5.3）
+├── client/ScreenStreamer.kt                        # JPEG 流式自推自适应节奏调度器（§5/P2）
 ├── client/MgmtApiHttp.kt                           # REST 共享 OkHttp/线程池/信封解析（P1 账号化）
 ├── client/AccessCodeClient.kt                      # GET /device/access-code/mine 拉本租户 matchCode
 ├── service/ManagementPlatformService.kt            # dataSync 前台服务，保活 + 承载连接
@@ -52,7 +53,8 @@ app/src/main/java/org/autojs/autojs/mgmt/
 ├── auth/AccountApiClient.kt                        # /auth/code、/auth/login、/auth/logout（账号密码+图形验证码）
 ├── auth/AccountTokenStore.kt                       # JWT AndroidKeyStore AES/GCM 加密 SP 持久化
 └── ui/
-    └── MgmtPlatformLoginMenu.kt                    # 抽屉「账号」分区三态状态机 + 账号登录弹窗 (H9, P1)
+    ├── MgmtPlatformLoginMenu.kt                    # 抽屉「账号」分区三态状态机 + 账号登录弹窗 (H9, P1)
+    └── MgmtWakeUnlockActivity.kt                   # P3 MINIMAL 档亮屏/解锁非密码锁/回主屏透明 Activity (H1)
 ```
 
 构建类型 source set 双实现（同名类 `config/MgmtEnv`，编译期按构建类型二选一，零上游构建文件改动；
@@ -90,7 +92,7 @@ app/src/release/java/org/autojs/autojs/mgmt/config/MgmtEnv.kt   # 生产环境: 
 
 - 偏好文件：`org.autojs.autojs6_preferences.xml`（PreferenceManager 默认 SP）。
 - 键字面值是**固定契约**（已安装版本依赖这些键，改名会丢用户配置，均由 `MgmtPref` 常量持有）：
-  - `key_$_management_platform_server_address`（Kotlin 源码写 `"\$_"`）：2026-10-09 P1 起
+  - `key_$_management_platform_server_address`（Kotlin 源码写 `"\$_"`）：2026-10-08 P1 起
     **退化为 debug 手工覆盖键**——生效地址统一由 `config/MgmtServerConfig.kt` 解析，
     环境常量由构建类型 source set 双实现 `config/MgmtEnv.kt` 编译期注入：
     release（`src/release`）恒为生产域名 `https://autojs6.80fafa.com` 且 `ALLOW_LOCAL_OVERRIDE=false`
@@ -125,7 +127,7 @@ app/src/release/java/org/autojs/autojs/mgmt/config/MgmtEnv.kt   # 生产环境: 
 
 | 编号 | 文件 | 位置 | 内容 |
 |---|---|---|---|
-| H1 | `app/src/main/AndroidManifest.xml` | L103-104、L427-431 | `FOREGROUND_SERVICE_DATA_SYNC` 权限 + `ManagementPlatformService` 声明（`foregroundServiceType="dataSync"`、`exported=false`） |
+| H1 | `app/src/main/AndroidManifest.xml` | L103-104、L106-107、L430-434、L436-443 | `FOREGROUND_SERVICE_DATA_SYNC` + `USE_FULL_SCREEN_INTENT` 权限；`ManagementPlatformService` 声明（`foregroundServiceType="dataSync"`、`exported=false`）；`MgmtWakeUnlockActivity` 声明（P3，`exported=false`、透明主题，仅追加条目） |
 | H2 | `.../autojs/App.kt` | L85-86（+import L30） | 主进程 `onCreate` 调 `Mgmt.bootstrap(this)` |
 | H3 | `.../autojs/AutoJs.kt` | L66-67（+import L34） | 引擎初始化后 `Mgmt.onEngineReady(scriptEngineService)` |
 | H4 | `.../core/accessibility/AccessibilityService.kt` | L161-162、L173-174（+import L14） | `onDestroy` / `onServiceConnected` 各调一次 `Mgmt.onAccessibilityStateChanged()`（注意：清单中实际绑定服务是 `AccessibilityServiceUsher`） |
@@ -189,10 +191,11 @@ force-stop 后由非 Launcher 入口唤起时 `mAllowStartForeground=false`，
 `SCRIPT_LIST`、`INSTALLED_APPS`、`RUNNING_SCRIPTS`、`SCHEDULED_SCRIPTS`、
 `SCRIPT_CONTENT`、`LOG_LINES`、`SCREENSHOT`、`SCRIPT_STATUS_UPDATE`。
 
-设备端入站 22 种（`ManagementPlatformClient` when 块）：
+设备端入站 24 种（`ManagementPlatformClient` when 块）：
 `AUTH_OK`、`AUTH_FAILED`、`REQUEST_SCRIPT_LIST`、`PUSH_SCRIPT`、`RUN_SCRIPT`、
 `STOP_SCRIPT`、
-`REQUEST_SCREENSHOT`、`TOUCH_EVENT`、`DEVICE_ACTION`、`REQUEST_RUNNING_SCRIPTS`、
+`REQUEST_SCREENSHOT`、`SCREEN_STREAM_START`、`SCREEN_STREAM_STOP`、
+`TOUCH_EVENT`、`DEVICE_ACTION`、`REQUEST_RUNNING_SCRIPTS`、
 `REQUEST_SCHEDULED_SCRIPTS`、`REQUEST_INSTALLED_APPS`、`REQUEST_LOG_TAIL`、
 `REQUEST_SCRIPT_CONTENT`、`UPDATE_SCRIPT_CONTENT`、`DELETE_SCRIPT`、`CREATE_FOLDER`、
 `CREATE_INTENT_TASK`、`CREATE_TIMED_TASK`、`DELETE_SCHEDULED_TASK`、`INSTALL_APK`、
@@ -205,6 +208,29 @@ force-stop 后由非 Launcher 入口唤起时 `mAllowStartForeground=false`，
   （支持同脚本多开）；结果经 `COMMAND_RESULT` 回执（无运行实例回失败并带中文原因）。
   支持该指令的客户端在 `CAPABILITIES`/`HEARTBEAT` 能力快照中上报 `stopScript:true`，
   旧客户端缺省该位时服务端前置拦截（错误码 7011），不静默超时。
+
+- **`SCREEN_STREAM_START` / `SCREEN_STREAM_STOP`（2026-10-07 追加，P2 JPEG 流式自推）**：
+  入站 START `{ quality, maxWidth?, maxHeight? }`。首个观看者加入观看网关时由服务端下发，
+  客户端经 `mgmt/client/ScreenStreamer.kt`（调度线程 `mgmt-screen-stream`）自步进连续抓帧推送
+  （帧间不等浏览器请求，消除每帧一个跨境往返 RTT 的停顿）；末个观看者离开下发 STOP。
+  初始帧间隔 80ms，系统截图限流（errorCode=3）按 +100ms 阶梯退避学习本机最小间隔，
+  连续成功 20 帧后 -20ms 下探（下限 33ms）；in-flight 始终单帧。START 重复发送=参数热更新
+  （幂等），STOP 幂等；连接断开/退出登录立即停止，重连后服务端按观看者存在情况恢复并经
+  观看网关通知 `STREAM_RESUMED`。推流期间的手动 REQUEST_SCREENSHOT 聚合到下一帧成功推送后
+  统一回执。支持客户端在 CAPABILITIES 上报 `screenStream:true`；旧客户端缺省该位时服务端
+  回退旧的浏览器 request-frame 按需路径。
+
+- **DEVICE_ACTION `unlock` + 唤醒 Activity（2026-10-07 追加，P3 MINIMAL 无障档）**：
+  新增动作 `action:"unlock"`，启动 `mgmt/ui/MgmtWakeUnlockActivity.kt`（op=wake_unlock）：
+  `setTurnScreenOn/setShowWhenLocked` 亮屏，`KeyguardManager.requestDismissKeyguard`
+  解除**非密码**锁屏（上滑/无密码直接进桌面）；`isDeviceSecure=true`（密码/PIN/图案）
+  不发起 dismiss，直接 COMMAND_RESULT 失败并附中文指引。同一 Activity 承接
+  `screen_on`（WakeLock/root 键码均失败后 op=wake）与 `home`（无障碍/root 均不可用时
+  op=home，解锁成功后发 CATEGORY_HOME）的逐级兜底。后台 startActivity 被 BAL 静默拦截时
+  以 Activity onCreate 桥接回调 + 1200ms 超时识别，超时走 `USE_FULL_SCREEN_INTENT`
+  全屏意图通知（CATEGORY_CALL，2000ms 超时），仍失败回报"请手动点亮屏幕"。
+  CAPABILITIES 上报 `minimal:true`；服务端在 accessibility/root 皆无时**不**下发
+  SCREEN_STREAM_START（避免无限退避空转），前端画面区切空态卡 + 可用操作按钮矩阵。
 
 - 鉴权：HTTP 升级后服务端按 `matchCode` 校验租户，成功回 `AUTH_OK`，失败回
   `AUTH_FAILED`（业务码 4001）并关闭连接。
@@ -348,7 +374,7 @@ LocaleManager binder，与薄层无关），点等待/二次启动即恢复，�
 脚本内主动 `exit()` 会令引擎抛 `ScriptInterruptedException`，运行事件记为 error
 （日志中脚本实际正常「运行结束」），属引擎既有行为。
 
-### 9.1 P1 账号化地基（2026-10-09，集成市场方案 §7/§10.1，双 flavor 构建通过）
+### 9.1 P1 账号化地基（2026-10-08，集成市场方案 §7/§10.1，双 flavor 构建通过）
 
 本轮双 flavor（`:app:assembleAppDebug` / `:app:assembleInrtDebug`）编译/资源链接通过；
 设备侧运行冒烟待模拟器执行，验收剧本（A13）：
@@ -387,7 +413,6 @@ mgmt/
 ```
 
 自有资源：`res/layout/mgmt_activity_market.xml`、`res/drawable/mgmt_ic_store.xml`、
-`res/values/mgmt_market_styles.xml`（Mgmt.Market Bridge 主题）、
 `mgmt_action_market` + `mgmt_market_*` 字符串（values/ 与 values-zh/ 双份，均带 @mgmt-hook H8）。
 
 契约要点：
@@ -398,3 +423,4 @@ mgmt/
   `window.dispatchEvent(new CustomEvent('mgmt:install-result',{detail:{ok,message}}))` 回派；
 - 游客可浏览/下载免费脚本；需要登录的交互（发帖/评论）由门户页引导 /admin/login，
   客户端拦截该 URL 收口到 P1 原生登录弹窗，登录成功后刷新 WebView。
+

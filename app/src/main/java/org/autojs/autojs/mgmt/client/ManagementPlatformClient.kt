@@ -2,6 +2,9 @@ package org.autojs.autojs.mgmt.client
 
 import android.accessibilityservice.AccessibilityService as AndroidAccessibilityService
 import android.accessibilityservice.GestureDescription
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.pm.ApplicationInfo
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -11,6 +14,8 @@ import android.os.Environment
 import android.util.Base64
 import android.util.Log
 import android.view.Display
+import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import android.bluetooth.BluetoothAdapter
 import android.content.Context
 import android.content.Intent
@@ -31,10 +36,17 @@ import java.nio.ByteOrder
 import org.autojs.autojs.AutoJs
 import org.autojs.autojs.app.GlobalAppContext
 import org.autojs.autojs.core.accessibility.AccessibilityService as AutoJsAccessibilityService
+import org.autojs.autojs.mgmt.client.engine.ScrcpyEngineHost
+import org.autojs.autojs.mgmt.client.engine.ScrcpyLocalEngine
+import org.autojs.autojs.mgmt.client.engine.ScrcpyStartArgs
+import org.autojs.autojs.mgmt.client.engine.ScrcpyStartResult
 import org.autojs.autojs.mgmt.auth.AccountSession
 import org.autojs.autojs.mgmt.config.MgmtServerConfig
 import org.autojs.autojs.mgmt.core.DeviceFingerprint
 import org.autojs.autojs.mgmt.pref.MgmtPref
+import org.autojs.autojs.mgmt.ui.MgmtWakeUnlockActivity
+import org.autojs.autojs.runtime.api.WrappedShizuku
+import org.autojs.autojs6.R
 import org.autojs.autojs.execution.ExecutionConfig
 import org.autojs.autojs.execution.ScriptExecution
 import org.autojs.autojs.model.script.ScriptFile
@@ -71,7 +83,7 @@ import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
 import kotlin.math.roundToInt
 
-object ManagementPlatformClient {
+object ManagementPlatformClient : ScrcpyEngineHost {
 
     private const val TAG = "ManagementPlatformClient"
 
@@ -192,6 +204,10 @@ object ManagementPlatformClient {
      */
     @Synchronized
     private fun onConnectionLost() {
+        // 连接断开即停止连续抓帧（避免无连接时空转耗电）；重连后服务端按观看者存在情况恢复
+        runCatching { screenStreamer.stop() }
+        // P4：本地 scrcpy 引擎同样停止（其上行通道已不存在）
+        runCatching { scrcpyEngine.abort() }
         if (status.state == ConnectionState.CONNECTED) {
             enterRecovering(alreadyEscalated = false)
         }
@@ -359,6 +375,13 @@ object ManagementPlatformClient {
     private const val FRAME_FLAG_KEYFRAME: Int = 0x01
     private const val MEDIA_HEADER_SIZE = 24
 
+    /** scrcpy 默认码率 / 帧率（与服务端 device.engine 配置默认值对齐） */
+    private const val SCRCPY_DEFAULT_BITRATE = 8_000_000
+    private const val SCRCPY_DEFAULT_FPS = 30
+
+    /** 可经 scrcpy 控制通道注入的系统按键 */
+    private val SCRCPY_ENGINE_ACTIONS = setOf("back", "home", "recents", "notifications", "collapse")
+
     /**
      * 系统无障碍截图最小间隔限流 (errorCode=3 ERROR_TAKE_SCREENSHOT_INTERVAL_TIME_SHORT，
      * Android 16/API36 模拟器实测值；旧资料误记为 1，一律以符号常量为准) 的退避重试：
@@ -382,6 +405,52 @@ object ManagementPlatformClient {
     @Volatile
     private var screenshotInFlight: Boolean = false
     private val pendingScreenshotCommands = java.util.Collections.synchronizedList(mutableListOf<String>())
+
+    /**
+     * JPEG 流式自推调度器（P2）：首个观看者加入时由服务端 SCREEN_STREAM_START 唤醒，
+     * 设备自步进连续抓帧，末个观看者离开时 SCREEN_STREAM_STOP 停摆。
+     */
+    private val screenStreamer: ScreenStreamer by lazy {
+        ScreenStreamer(
+            object : ScreenStreamer.CaptureRequester {
+                override fun requestCapture(quality: Int, maxWidth: Int, maxHeight: Int): Boolean =
+                    requestStreamCapture(quality, maxWidth, maxHeight)
+
+                override fun canCaptureNow(): Boolean = hasCaptureChannel()
+            },
+        )
+    }
+
+    /**
+     * 本地 scrcpy 引擎（P4，root / Shizuku 两档共用）。
+     */
+    private val scrcpyEngine: ScrcpyLocalEngine by lazy { ScrcpyLocalEngine(this) }
+
+    /** 待回执的 SCRCPY_START commandId（服务端同一时刻仅一个待确认 START） */
+    private var pendingScrcpyStartCommandId: String? = null
+
+    /** 待回执的 SCRCPY_STOP commandId */
+    private var pendingScrcpyStopCommandId: String? = null
+
+    /**
+     * 推流期间到达的手动 REQUEST_SCREENSHOT：聚合 commandId，
+     * 下一帧成功推送后统一回执成功；推流停止时回执失败促使走按需路径。
+     */
+    private val pendingStreamScreenshotCommands =
+        java.util.Collections.synchronizedList(mutableListOf<String>())
+
+    /**
+     * P3：MINIMAL 档唤醒/解锁 Activity 的后台启动跟踪
+     *
+     * 直接 startActivity 在 Android 10+ 可能被 BAL 静默拦截（不抛异常、Activity 不创建），
+     * 以 created 回调 + 超时识别；超时走全屏意图通知兜底，仍失败回报手动指引。
+     */
+    private val wakeLaunchTokenSeq = java.util.concurrent.atomic.AtomicInteger(0)
+    private class PendingWakeLaunch(val commandId: String?, val op: String, @Volatile var timeout: Runnable?)
+    private val pendingWakeLaunches = java.util.concurrent.ConcurrentHashMap<Int, PendingWakeLaunch>()
+
+    /** 已被宣告失败的启动 token（有界小集合，进程级，重启自清） */
+    private val failedWakeTokens = java.util.concurrent.ConcurrentHashMap.newKeySet<Int>()
 
     @Volatile
     private var webSocket: WebSocket? = null
@@ -471,6 +540,15 @@ object ManagementPlatformClient {
             ACCESSIBILITY_COMPONENT +
             " && adb shell settings put secure accessibility_enabled 1（重新运行 build-client.ps1 安装也会自动授权）"
 
+    /** P3：唤醒全屏意图通知渠道 */
+    private const val WAKE_CHANNEL_ID = "mgmt_wake_unlock"
+
+    /** P3：直接 startActivity 后等待 Activity 创建的超时（BAL 静默拦截判定） */
+    private const val DIRECT_START_TIMEOUT_MS = 1200L
+
+    /** P3：全屏意图通知后等待 Activity 创建的超时 */
+    private const val FULL_SCREEN_TIMEOUT_MS = 2000L
+
     /** 缺存储权限时回给 PC 端的统一操作指引 */
     private const val HINT_STORAGE =
         "脚本无法写入设备存储：缺少「所有文件访问」权限。" +
@@ -514,9 +592,9 @@ object ManagementPlatformClient {
 
     /**
      * 用户点「断开连接」(方案 §7.1: 连接与会话独立):
-     * 取消退避重连/心跳并关闭 WebSocket, 但**保留**账号登录态与租户展示信息
-     * (同账号再次连接时无需重登); 不清除任何持久化凭证。
-     * 与 [logout] 的区别: 不清 outbox/不丢租户信息, 进程重启即自动恢复在线。
+     * 取消退避重连/心跳并关闭 WebSocket, 但**保留**账号登录态、租户展示信息与 outbox
+     * (同账号再次连接时 AUTH_OK 继续幂等重放); 不清除任何持久化凭证。
+     * 与 [logout] 的区别: 不删 outbox/不停推流之外的账号数据, 进程重启即自动恢复在线。
      */
     @Synchronized
     fun userDisconnect() {
@@ -526,6 +604,8 @@ object ManagementPlatformClient {
         stopHeartbeat()
         connectionActive = false
         lastConnectKey = null
+        runCatching { screenStreamer.stop() }
+        runCatching { scrcpyEngine.abort() }
         val ws = webSocket
         webSocket = null
         runCatching { ws?.close(1000, "user disconnect") }
@@ -553,6 +633,10 @@ object ManagementPlatformClient {
         tenantName = null
         // 清空 outbox: 积压消息不得跨账号/跨租户重放（防越权数据泄漏, 方案 §5.3）
         OutboxManager.clear()
+        // 停止连续推流（退出后不再有观看者）
+        runCatching { screenStreamer.stop() }
+        // P4：停止本地 scrcpy 引擎
+        runCatching { scrcpyEngine.abort() }
         val ws = webSocket
         webSocket = null
         runCatching { ws?.close(1000, "user logout") }
@@ -737,8 +821,21 @@ object ManagementPlatformClient {
             },
         )
         caps.put("root", rootAvailable)
-        // mgmt STOP_SCRIPT 协议（停止指定路径脚本或全部引擎）自本版本起支持
+        // mgmt STOP_SCRIPT 协议（停止指定路径脚本或全部脚本引擎）自本版本起支持
         caps.put("stopScript", true)
+        // P2：支持 SCREEN_STREAM_START/STOP 连续推流（旧服务端不读取该字段，无副作用）
+        caps.put("screenStream", true)
+        // P4：root 档支持 SCRCPY_START/STOP（旧服务端不读取，无副作用）
+        caps.put("scrcpyRoot", rootAvailable)
+        // P4：Shizuku 分级能力：安装 / 运行 / 授权三者齐备才置 shizuku=true
+        val shizukuInstalled = runCatching { WrappedShizuku.isInstalled(appContext) }.getOrDefault(false)
+        val shizukuRunning = runCatching { WrappedShizuku.isRunning() }.getOrDefault(false)
+        val shizukuGranted = runCatching { WrappedShizuku.hasPermission() }.getOrDefault(false)
+        caps.put("shizukuInstalled", shizukuInstalled)
+        caps.put("shizukuRunning", shizukuRunning)
+        caps.put("shizuku", shizukuInstalled && shizukuRunning && shizukuGranted)
+        // P3：支持 MINIMAL 档 unlock 动作与唤醒/解锁 Activity（旧服务端不读取，无副作用）
+        caps.put("minimal", true)
         return caps
     }
 
@@ -1039,6 +1136,10 @@ object ManagementPlatformClient {
                 "RUN_SCRIPT" -> handleRunScript(payload)
                 "STOP_SCRIPT" -> handleStopScript(payload)
                 "REQUEST_SCREENSHOT" -> handleRequestScreenshot(payload)
+                "SCREEN_STREAM_START" -> handleScreenStreamStart(payload)
+                "SCREEN_STREAM_STOP" -> handleScreenStreamStop(payload)
+                "SCRCPY_START" -> handleScrcpyStart(payload)
+                "SCRCPY_STOP" -> handleScrcpyStop(payload)
                 "TOUCH_EVENT" -> handleTouchEvent(payload)
                 "DEVICE_ACTION" -> handleDeviceAction(payload)
                 "REQUEST_RUNNING_SCRIPTS" -> sendRunningScriptsSafe()
@@ -1816,11 +1917,209 @@ object ManagementPlatformClient {
         }
     }
 
+    // ============ SCREEN_STREAM_*（P2 流式自推） ============
+
+    private fun handleScreenStreamStart(payload: JSONObject) {
+        val commandId = payload.optString("commandId").takeIf { it.isNotEmpty() }
+        val quality = payload.optInt("quality", ScreenStreamer.DEFAULT_QUALITY).coerceIn(30, 100)
+        val maxWidth = payload.optInt("maxWidth", 0).coerceAtLeast(0)
+        val maxHeight = payload.optInt("maxHeight", 0).coerceAtLeast(0)
+        screenStreamer.start(quality, maxWidth, maxHeight) { started ->
+            if (started) {
+                Log.i(TAG, "SCREEN_STREAM_START q=$quality max=${maxWidth}x${maxHeight}")
+                replyCommandResult(commandId, true)
+            } else {
+                Log.w(TAG, "SCREEN_STREAM_START rejected: no capture channel")
+                replyCommandResult(commandId, false, "当前无可用抓帧通道（需开启无障碍或 root）")
+            }
+        }
+    }
+
+    private fun handleScreenStreamStop(payload: JSONObject) {
+        val commandId = payload.optString("commandId").takeIf { it.isNotEmpty() }
+        screenStreamer.stop()
+        // 聚合中的手动请求：流已停，回执失败让调用方改走按需请求
+        val pending = synchronized(pendingStreamScreenshotCommands) {
+            val ids = pendingStreamScreenshotCommands.toList()
+            pendingStreamScreenshotCommands.clear()
+            ids
+        }
+        pending.forEach { replyCommandResult(it, false, "画面流已停止，请重新请求画面") }
+        Log.i(TAG, "SCREEN_STREAM_STOP")
+        replyCommandResult(commandId, true)
+    }
+
+    /**
+     * 启动本地 scrcpy 引擎（root / Shizuku 共用）。引擎下载 jar + 首帧确认结果
+     * 经 [ScrcpyEngineHost.onStartResult] 异步回执；身份明显不满足时立即拒绝。
+     */
+    private fun handleScrcpyStart(payload: JSONObject) {
+        val commandId = payload.optString("commandId")
+        val mode = payload.optString("mode")
+        if (mode != "root" && mode != "shizuku") {
+            replyCommandResult(commandId, false, "SCRCPY_START 缺少合法 mode 字段")
+            return
+        }
+        val serverVersion = payload.optString("serverVersion")
+        if (serverVersion.isEmpty()) {
+            replyCommandResult(commandId, false, "SCRCPY_START 缺少 serverVersion 字段")
+            return
+        }
+        if (mode == "root" && !rootAvailable) {
+            replyCommandResult(commandId, false, "root 不可用，无法启动 scrcpy（请确认设备已授权 root）")
+            return
+        }
+        if (mode == "shizuku" && !shizukuOperational()) {
+            replyCommandResult(
+                commandId,
+                false,
+                "Shizuku 未运行或未授权本应用，请先激活 Shizuku 并在其应用内对 AutoJs6 授权",
+            )
+            return
+        }
+        val args = ScrcpyStartArgs(
+            runMode = mode,
+            serverVersion = serverVersion,
+            serverSha256 = payload.optString("serverSha256").takeIf { it.isNotEmpty() },
+            bitrate = payload.optInt("bitrate", SCRCPY_DEFAULT_BITRATE),
+            fps = payload.optInt("fps", SCRCPY_DEFAULT_FPS),
+            maxWidth = payload.optInt("maxWidth", 0),
+            maxHeight = payload.optInt("maxHeight", 0),
+        )
+        pendingScrcpyStartCommandId = commandId.takeIf { it.isNotEmpty() }
+        scrcpyEngine.start(args)
+    }
+
+    /** 停止本地 scrcpy 引擎（幂等：未运行直接回执成功） */
+    private fun handleScrcpyStop(payload: JSONObject) {
+        val commandId = payload.optString("commandId")
+        if (!scrcpyEngine.isActive()) {
+            replyCommandResult(commandId, true)
+            return
+        }
+        pendingScrcpyStopCommandId = commandId.takeIf { it.isNotEmpty() }
+        scrcpyEngine.stop()
+    }
+
+    /** Shizuku 服务是否运行且已授权本应用（复用官方封装，异常按未就绪处理） */
+    private fun shizukuOperational(): Boolean =
+        runCatching { WrappedShizuku.isOperational() }.getOrDefault(false)
+
+    /**
+     * 当前是否存在抓帧通道：Android 11+ 无障碍 takeScreenshot，或 root screencap（不限版本）。
+     * START 前置检查与服务端门控口径一致。
+     */
+    private fun hasCaptureChannel(): Boolean {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && AutoJsAccessibilityService.instance != null) {
+            return true
+        }
+        return rootAvailable
+    }
+
+    /**
+     * 流式抓帧（无内部重试：系统限流由 ScreenStreamer 自适应节奏处理）
+     *
+     * @returns true=抓帧已发起，结果经 screenStreamer.reportResult 回报；
+     * false=无障碍与 root 通道当前都不可用（调度器退避保持，通道恢复后自动出帧）
+     */
+    private fun requestStreamCapture(quality: Int, maxWidth: Int, maxHeight: Int): Boolean {
+        val service = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            AutoJsAccessibilityService.instance
+        } else {
+            null
+        }
+        if (service != null) {
+            return try {
+                service.takeScreenshot(
+                    Display.DEFAULT_DISPLAY,
+                    shotExecutor,
+                    object : AndroidAccessibilityService.TakeScreenshotCallback {
+                        override fun onSuccess(screenshot: AndroidAccessibilityService.ScreenshotResult) {
+                            val hardwareBuffer = screenshot.hardwareBuffer
+                            try {
+                                val hardwareBitmap = Bitmap.wrapHardwareBuffer(hardwareBuffer, screenshot.colorSpace)
+                                if (hardwareBitmap == null) {
+                                    screenStreamer.reportResult(ScreenStreamer.CaptureOutcome.FAILED)
+                                    return
+                                }
+                                val bitmap = try {
+                                    hardwareBitmap.copy(Bitmap.Config.ARGB_8888, true)
+                                } finally {
+                                    hardwareBitmap.recycle()
+                                }
+                                if (bitmap == null) {
+                                    screenStreamer.reportResult(ScreenStreamer.CaptureOutcome.FAILED)
+                                    return
+                                }
+                                val sent = sendScreenshotBitmap(bitmap, quality, maxWidth, maxHeight)
+                                screenStreamer.reportResult(
+                                    if (sent) ScreenStreamer.CaptureOutcome.SUCCESS
+                                    else ScreenStreamer.CaptureOutcome.FAILED,
+                                )
+                                if (sent) acknowledgePendingStreamRequests()
+                            } catch (e: Exception) {
+                                Log.w(TAG, "stream screenshot success handling failed", e)
+                                screenStreamer.reportResult(ScreenStreamer.CaptureOutcome.FAILED)
+                            } finally {
+                                runCatching { hardwareBuffer.close() }
+                            }
+                        }
+
+                        override fun onFailure(errorCode: Int) {
+                            Log.w(TAG, "stream screenshot failed, errorCode=$errorCode")
+                            val rateLimited =
+                                errorCode == AndroidAccessibilityService.ERROR_TAKE_SCREENSHOT_INTERVAL_TIME_SHORT
+                            screenStreamer.reportResult(
+                                if (rateLimited) ScreenStreamer.CaptureOutcome.RATE_LIMITED
+                                else ScreenStreamer.CaptureOutcome.FAILED,
+                            )
+                        }
+                    },
+                )
+                true
+            } catch (e: Throwable) {
+                Log.w(TAG, "stream screenshot dispatch failed", e)
+                false
+            }
+        }
+
+        if (!rootAvailable) {
+            return false
+        }
+        // root 路径：screencap 阻塞，放 root 线程；失败原因不可细分，自适应退避兜底
+        rootExecutor.execute {
+            val ok = captureScreenshotViaRoot(quality, maxWidth, maxHeight)
+            screenStreamer.reportResult(
+                if (ok) ScreenStreamer.CaptureOutcome.SUCCESS
+                else ScreenStreamer.CaptureOutcome.FAILED,
+            )
+            if (ok) acknowledgePendingStreamRequests()
+        }
+        return true
+    }
+
+    private fun acknowledgePendingStreamRequests() {
+        val ids = synchronized(pendingStreamScreenshotCommands) {
+            val list = pendingStreamScreenshotCommands.toList()
+            pendingStreamScreenshotCommands.clear()
+            list
+        }
+        ids.forEach { replyCommandResult(it, true, null) }
+    }
+
     private fun handleRequestScreenshot(payload: JSONObject) {
         val commandId = payload.optString("commandId").takeIf { it.isNotEmpty() }
         val quality = payload.optInt("quality", 75).coerceIn(30, 100)
         val maxWidth = payload.optInt("maxWidth", 0).coerceAtLeast(0)
         val maxHeight = payload.optInt("maxHeight", 0).coerceAtLeast(0)
+
+        // 流式自推进行中：手动单帧请求聚合到下一帧成功推送后统一回执，
+        // 不并发发起第二个截图（保持单 in-flight）
+        if (screenStreamer.isActive()) {
+            commandId?.let { pendingStreamScreenshotCommands.add(it) }
+            Log.d(TAG, "REQUEST_SCREENSHOT coalesced into active screen stream")
+            return
+        }
 
         // 抓帧 in-flight 聚合：进行中再来的请求复用本次抓帧结果，避免并发系统截图把图形内存/线程打满
         synchronized(pendingScreenshotCommands) {
@@ -2092,6 +2391,25 @@ object ManagementPlatformClient {
         val rawEndY = endObj?.optInt("y", -1) ?: -1
         val durationMs = payload.optLong("durationMs", 0L)
 
+        // P4：scrcpy 引擎活跃时，视频像素即屏幕像素，触摸直接走 scrcpy 控制通道
+        // （低延迟、真多点），不再需要历史截图尺寸映射。
+        if (scrcpyEngine.isActive()) {
+            val engineEndX = if (rawEndX >= 0) rawEndX else rawStartX
+            val engineEndY = if (rawEndY >= 0) rawEndY else rawStartY
+            val injected = scrcpyEngine.injectGesture(
+                type,
+                rawStartX,
+                rawStartY,
+                engineEndX,
+                engineEndY,
+                durationMs,
+            )
+            if (injected) {
+                replyCommandResult(commandId, true)
+                return
+            }
+        }
+
         // root 降级走 `input` 命令, 用的是真实屏幕坐标; 没有历史截图尺寸时无法做坐标映射,
         // 此时宁可拒绝也不要盲点 (图片展示尺寸未知, 坐标会错位)。
         val mappingReady = lastScreenshotImageWidth > 0 && lastScreenshotImageHeight > 0 &&
@@ -2220,12 +2538,29 @@ object ManagementPlatformClient {
             // 不依赖无障碍/root 的动作优先处理
             when (action) {
                 "screen_on" -> {
-                    runCatching { Device(appContext).wakeUpIfNeeded() }
-                        .onSuccess { replyCommandResult(commandId, true) }
-                        .onFailure {
-                            // 个别 ROM 上 WakeLock 亮屏受限, root 下降级 KEYCODE_WAKEUP
-                            runRootKeyevent(commandId, "KEYCODE_WAKEUP")
+                    val wakeLockOk = runCatching { Device(appContext).wakeUpIfNeeded() }.isSuccess
+                    if (wakeLockOk) {
+                        replyCommandResult(commandId, true)
+                        return
+                    }
+                    // WakeLock 亮屏受限：root KEYCODE_WAKEUP → 透明 Activity(setTurnScreenOn) 逐级兜底
+                    if (rootAvailable) {
+                        rootExecutor.execute {
+                            val keyOk = execRoot("input keyevent KEYCODE_WAKEUP")
+                            if (keyOk) {
+                                replyCommandResult(commandId, true)
+                            } else {
+                                launchWakeUnlock(MgmtWakeUnlockActivity.OP_WAKE, commandId)
+                            }
                         }
+                    } else {
+                        launchWakeUnlock(MgmtWakeUnlockActivity.OP_WAKE, commandId)
+                    }
+                    return
+                }
+                "unlock" -> {
+                    // 点亮并解除非密码锁屏；密码锁屏由 Activity 识别并回报准确失败
+                    launchWakeUnlock(MgmtWakeUnlockActivity.OP_WAKE_UNLOCK, commandId)
                     return
                 }
                 "volume_up" -> {
@@ -2252,6 +2587,15 @@ object ManagementPlatformClient {
                     replyCommandResult(commandId, true)
                     return
                 }
+            }
+
+            // P4：scrcpy 引擎活跃时，系统按键直接写控制通道（低延迟，不依赖无障碍）
+            if (scrcpyEngine.isActive() &&
+                action in SCRCPY_ENGINE_ACTIONS &&
+                scrcpyEngine.pressKey(action)
+            ) {
+                replyCommandResult(commandId, true)
+                return
             }
 
             // 依赖无障碍全局动作的按键
@@ -2284,10 +2628,27 @@ object ManagementPlatformClient {
                 }
             }
 
-            // 无障碍不可用/执行失败: root 键码降级 (通知栏无对应键码, 尝试 cmd statusbar)
+            // home 在无障碍不可用时：root 键码 → 透明 Activity（解锁后回主屏）逐级兜底
+            if (action == "home") {
+                if (rootAvailable) {
+                    rootExecutor.execute {
+                        val keyOk = execRoot("input keyevent KEYCODE_HOME")
+                        if (keyOk) {
+                            replyCommandResult(commandId, true)
+                        } else {
+                            launchWakeUnlock(MgmtWakeUnlockActivity.OP_HOME, commandId)
+                        }
+                    }
+                } else {
+                    launchWakeUnlock(MgmtWakeUnlockActivity.OP_HOME, commandId)
+                }
+                return
+            }
+
+            // 无障碍不可用/执行失败: root 键码降级 (通知栏无对应键码, 尝试 cmd statusbar；
+            // home 已在上方专门分支提前 return，不在此表)
             val keyCode = when (action) {
                 "back" -> "KEYCODE_BACK"
-                "home" -> "KEYCODE_HOME"
                 "recents" -> "KEYCODE_APP_SWITCH"
                 "screen_off" -> "KEYCODE_SLEEP"
                 "notifications" -> null
@@ -2333,6 +2694,127 @@ object ManagementPlatformClient {
                 replyCommandResult(commandId, false, "root 按键执行失败：input keyevent $keyCode")
             }
         }
+    }
+
+    // ============ P3 MINIMAL：唤醒/解锁 Activity 启动跟踪 ============
+
+    /**
+     * 启动唤醒/解锁透明 Activity。
+     *
+     * Android 10+ 后台 Activity 启动（BAL）被拦截时 startActivity 静默返回、
+     * Activity 不创建，故以 Activity onCreate 回调 + 超时识别；超时后改用
+     * 全屏意图通知（锁屏下可直接全屏拉起），仍失败回报中文手动指引。
+     */
+    private fun launchWakeUnlock(op: String, commandId: String?) {
+        val token = wakeLaunchTokenSeq.incrementAndGet()
+        val pending = PendingWakeLaunch(commandId, op, null)
+        pendingWakeLaunches[token] = pending
+
+        val dispatched = runCatching { appContext.startActivity(buildWakeIntent(op, commandId, token)) }
+            .isSuccess
+        if (!dispatched) {
+            // 启动直接抛异常：立即走全屏意图兜底
+            scheduleFullScreenFallback(token)
+            return
+        }
+
+        val timeout = Runnable { scheduleFullScreenFallback(token) }
+        pending.timeout = timeout
+        mainHandler.postDelayed(timeout, DIRECT_START_TIMEOUT_MS)
+    }
+
+    private fun buildWakeIntent(op: String, commandId: String?, token: Int): Intent =
+        Intent(appContext, MgmtWakeUnlockActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            .putExtra(MgmtWakeUnlockActivity.EXTRA_OP, op)
+            .putExtra(MgmtWakeUnlockActivity.EXTRA_LAUNCH_TOKEN, token)
+            .also { if (!commandId.isNullOrEmpty()) it.putExtra(MgmtWakeUnlockActivity.EXTRA_COMMAND_ID, commandId) }
+
+    /** 全屏意图通知兜底（BAL 拦截直接启动后的第二手段） */
+    private fun scheduleFullScreenFallback(token: Int) {
+        val pending = pendingWakeLaunches[token]
+        if (pending === null) return
+        pending.timeout?.let { mainHandler.removeCallbacks(it) }
+
+        val pendingIntent = PendingIntent.getActivity(
+            appContext,
+            token,
+            buildWakeIntent(pending.op, pending.commandId, token),
+            PendingIntent.FLAG_UPDATE_CURRENT or
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0,
+        )
+
+        val notified = runCatching {
+            ensureWakeChannel()
+            val notification = NotificationCompat.Builder(appContext, WAKE_CHANNEL_ID)
+                .setSmallIcon(R.drawable.mgmt_ic_login)
+                .setContentTitle("远程控制请求")
+                .setContentText("点击唤醒/解锁设备")
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setCategory(NotificationCompat.CATEGORY_CALL)
+                .setAutoCancel(true)
+                .setFullScreenIntent(pendingIntent, true)
+                .build()
+            NotificationManagerCompat.from(appContext)
+                .notify(MgmtWakeUnlockActivity.FULL_SCREEN_NOTIFICATION_ID, notification)
+        }.isSuccess
+        if (!notified) {
+            failWakeLaunch(token)
+            return
+        }
+
+        val timeout = Runnable { failWakeLaunch(token) }
+        pending.timeout = timeout
+        mainHandler.postDelayed(timeout, FULL_SCREEN_TIMEOUT_MS)
+    }
+
+    private fun ensureWakeChannel() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        val manager = appContext.getSystemService(NotificationManager::class.java)
+        if (manager.getNotificationChannel(WAKE_CHANNEL_ID) === null) {
+            val channel = NotificationChannel(WAKE_CHANNEL_ID, "远程唤醒", NotificationManager.IMPORTANCE_HIGH)
+            manager.createNotificationChannel(channel)
+        }
+    }
+
+    private fun failWakeLaunch(token: Int) {
+        val pending = pendingWakeLaunches.remove(token)
+        pending?.timeout?.let { mainHandler.removeCallbacks(it) }
+        // 撤销残留的全屏意图通知：避免事后点击拉起 Activity 产生迟到/矛盾回执
+        runCatching {
+            NotificationManagerCompat.from(appContext)
+                .cancel(MgmtWakeUnlockActivity.FULL_SCREEN_NOTIFICATION_ID)
+        }
+        // 标记该 token 已失败：慢机上 Activity 若事后才创建，应静默退出不再上报
+        failedWakeTokens.add(token)
+        if (pending === null) {
+            return
+        }
+        replyCommandResult(
+            pending.commandId,
+            false,
+            "无法在后台点亮/唤醒屏幕（系统限制了后台启动）。请手动点亮屏幕后重试，或先在设备上开启无障碍（或 root）。",
+        )
+    }
+
+    /**
+     * Activity 已真实创建：取消兜底超时（经 Mgmt 门面调用）。
+     *
+     * @returns true=token 仍有效，Activity 可继续执行并上报结果；
+     *          false=token 未知或已被超时宣告失败，Activity 必须静默 finish（防止矛盾双回执）
+     */
+    fun onWakeUnlockActivityCreated(launchToken: Int): Boolean {
+        val pending = pendingWakeLaunches.remove(launchToken)
+        if (pending === null) {
+            return false
+        }
+        pending.timeout?.let { mainHandler.removeCallbacks(it) }
+        return true
+    }
+
+    /** Activity 最终结果回报：转 COMMAND_RESULT（经 Mgmt 门面调用） */
+    fun reportWakeUnlockResult(commandId: String?, success: Boolean, message: String?) {
+        replyCommandResult(commandId, success, message)
     }
 
     fun onScriptStart(execution: ScriptExecution) {
@@ -2414,4 +2896,46 @@ object ManagementPlatformClient {
      * 实测可阻塞 5s+ 触发系统 ANR (2026-09-28 模拟器堆栈实证)。
      */
     fun deviceId(): String = DeviceFingerprint.get()
+
+    // ========== ScrcpyEngineHost（P4：引擎宿主能力实现） ==========
+
+    override val engineContext: Context
+        get() = appContext
+
+    override val engineHttpClient: OkHttpClient
+        get() = httpClient
+
+    override val platformHttpBase: String
+        get() = buildHttpBaseUrl(MgmtPref.serverAddress.trim()).trimEnd('/')
+
+    override val accessCode: String
+        get() = MgmtPref.secret.trim()
+
+    override fun sendVideoFrame(
+        msgType: Int,
+        flags: Int,
+        width: Int,
+        height: Int,
+        payload: ByteArray,
+    ): Boolean = sendMediaBinaryFrame(msgType, flags, width, height, payload)
+
+    override fun onStartResult(result: ScrcpyStartResult) {
+        val commandId = pendingScrcpyStartCommandId
+        pendingScrcpyStartCommandId = null
+        replyCommandResult(commandId, result.success, result.message)
+    }
+
+    override fun onStopResult(success: Boolean) {
+        val commandId = pendingScrcpyStopCommandId
+        pendingScrcpyStopCommandId = null
+        replyCommandResult(commandId, success)
+    }
+
+    override fun onEngineDied(message: String) {
+        // 上行 ENGINE_DIED：服务端据此清除引擎会话（不携带 commandId）
+        send(
+            "ENGINE_DIED",
+            JSONObject().apply { put("message", message) },
+        )
+    }
 }

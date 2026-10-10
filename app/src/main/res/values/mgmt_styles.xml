@@ -1,9 +1,23 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 薄层自有样式: 宿主主题为 AppCompat, 登录弹窗内的 Material TextInputLayout
-     (OutlinedBox) 运行时要求 MaterialComponents 主题, 用 Bridge 主题仅包裹弹窗视图,
-     不修改官方 AppTheme (见 mgmt_dialog_login.xml)。 -->
+<!--
+  薄层自有样式（独立资源文件，不覆盖官方同名资源）：
+  - MgmtThemeMaterialBridge：宿主 AppTheme 为 AppCompat，登录弹窗内的 Material
+    TextInputLayout (OutlinedBox) 运行时要求 MaterialComponents 主题，用 Bridge
+    主题仅包裹弹窗视图，不修改官方 AppTheme（见 mgmt_dialog_login.xml）；
+  - Mgmt.WakeUnlock：P3 MINIMAL 无障档唤醒/解锁 Activity 的透明主题。
+-->
 <resources>
 
     <style name="MgmtThemeMaterialBridge" parent="Theme.MaterialComponents.DayNight.Bridge" />
+
+    <style name="Mgmt.WakeUnlock" parent="@android:style/Theme.Translucent.NoTitleBar">
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowIsFloating">true</item>
+        <item name="android:windowContentOverlay">@null</item>
+        <item name="android:windowAnimationStyle">@null</item>
+        <item name="android:backgroundDimEnabled">false</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowActionBar">false</item>
+    </style>
 
 </resources>
