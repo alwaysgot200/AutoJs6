@@ -294,7 +294,7 @@ git clone --recurse-submodules https://github.com/alwaysgot200/autojs6_Managemen
 git submodule update --init --recursive
 ```
 
-fork 侧 `mgmt` 分支有新提交并推送后，在业务仓执行：
+fork 侧 `mgmt` 分支有新提交并推送后（例如换机器、他人推进），在业务仓执行：
 
 ```bash
 git submodule update --remote AutoJs6-master   # 按 .gitmodules 的 branch=mgmt 拉到 origin/mgmt 最新提交
@@ -302,13 +302,27 @@ git add AutoJs6-master                         # 暂存新指针（子模块内 
 git commit -m "chore: bump AutoJs6 submodule to <短SHA>"
 ```
 
-- 业务仓内**只允许**通过 submodule 更新本目录；不要在业务仓直接改
-  `AutoJs6-master/` 内文件（改动回灌不到 fork，且与主仓锁定指针冲突）。
-- 如需改客户端，先在本仓（fork）的 `mgmt` 分支提交并推送，再回业务仓更新指针。
+**日常客户端开发（2026-10-11 起的唯一路径，旧的独立 clone `d:\work\autojs6-fork` 已废弃）**：
+
+```bash
+# 业务仓内的 AutoJs6-master/ 本身就是 fork 的完整 clone（origin = GitHub fork），直接在里面开发：
+cd AutoJs6-master
+git switch mgmt            # 跟踪 origin/mgmt；不要停留在 detached HEAD 上提交
+# …改 mgmt/ 自有文件 + 白名单挂钩，双 flavor 构建、git checkout -- version.properties…
+git add -A && git commit -m "mgmt: …"
+git push origin mgmt       # 直接推到 GitHub fork；走代理先 $env:HTTPS_PROXY='http://127.0.0.1:10808'
+cd ..
+git add AutoJs6-master && git commit -m "chore: bump AutoJs6 submodule to <短SHA>"
+```
+
+- 子模块工作区 = fork 工作区，提交推送一步到位；**【禁止】**"独立 clone 改 → 推送 → 子模块
+  再 pull"的两段式流程，也不要在 detached HEAD 上提交（提交会因切分支丢失）。
+- 主仓通过 submodule 指针（精确 commit）消费本目录历史；**【禁止】** subtree merge、
+  手工拷贝文件。
 - 首次挂入（已完成，备查）：业务仓执行
   `git submodule add -b mgmt ../AutoJs6.git AutoJs6-master`。
 - 走本机代理时先设置 `$env:HTTPS_PROXY='http://127.0.0.1:10808'`（PowerShell）：子模块
-  克隆/更新进程不读主仓 `http.proxy`，推送本仓到 GitHub 同样需要。
+  克隆/更新/推送进程不读主仓 `http.proxy`。
 
 ---
 
