@@ -1493,6 +1493,9 @@
     <string name="mgmt_market_storage_required">安装脚本需要「所有文件访问」权限，请授权后重新点击安装。</string>
     <string name="mgmt_market_busy">另一个脚本正在安装，请稍候…</string>
     <string name="mgmt_market_bad_args">安装请求无效</string>
+    <!-- @mgmt-hook H8: P5 安装失败指引对话框 (标题/确认按钮; 正文为后端 71xx 中文指引或本地校验原因)。 -->
+    <string name="mgmt_market_failed_title">安装失败</string>
+    <string name="mgmt_market_failed_confirm">我知道了</string>
     <!-- @mgmt-hook H8: 连接状态常驻通知 (安静窗口内只展示 default, 不打扰)。 -->
     <string name="mgmt_notif_title">AutoJs6 管理服务</string>
     <string name="mgmt_notif_default">正在保持与管理平台的连接</string>

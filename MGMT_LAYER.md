@@ -424,3 +424,69 @@ mgmt/
 - 游客可浏览/下载免费脚本；需要登录的交互（发帖/评论）由门户页引导 /admin/login，
   客户端拦截该 URL 收口到 P1 原生登录弹窗，登录成功后刷新 WebView。
 
+---
+
+## 11. P5 收费购买闭环、会话同步与失败指引（2026-10-11 追加，无新挂钩点）
+
+收费购买/续费/席位设备管理的 APP 端全流程（方案 §13.1 P5）。后端接口、前端门户页
+（订单/收银/席位/详情支付后自动安装）均在业务仓实现；客户端本轮只补「会话桥 +
+失败提示」两处缺口，**全部为 mgmt 自有文件改动 + H8 追加，白名单外官方文件零改动**：
+
+```
+mgmt/
+├── auth/AccountSession.kt            # +refreshToken() 只读访问器（供桥同步 refresh 令牌）
+├── client/MarketApiClient.kt        # DownloadException(val bizCode: Int?, message) +
+│                                     # 次构造；非 2xx 先解析统一信封再抛，码值随消息上抛
+└── ui/market/
+    ├── MarketActivity.kt             # 账号监听登录/退出均 reload；+nativeLogout()；
+    │                                 # 安装失败改 AlertDialog（替 toast）+ TAG 日志
+    └── MarketWebBridge.kt           # +@JavascriptInterface getRefreshToken()/nativeLogout()
+```
+
+H8 字符串双份追加（values + values-zh，均带 `@mgmt-hook H8: P5 …` 注释）：
+`mgmt_market_failed_title`（安装失败 / Installation failed）、
+`mgmt_market_failed_confirm`（我知道了 / Got it）。对话框正文不新增字符串，
+直接使用后端 71xx 信封中文指引或本地校验原因。
+
+桥契约增量（注入名仍为 `window.MgmtBridge`，前端事实来源业务仓
+`apps/web/src/utils/native-bridge.ts`）：
+
+- `getToken()` 已有；新增 `getRefreshToken()` —— 门户启动时把原生双令牌同步进
+  WebView localStorage（前端 `syncNativeSession()` 在 store/auth 初始化前执行），
+  此后购买/订单/席位等鉴权请求与普通浏览器同链路，**禁止**门户页另造认证；
+- 新增 `nativeLogout()` —— 门户顶栏退出的唯一原生收口；WebView 不持独立登录态，
+  仅清 web 存储会在下次启动同步时被原生会话恢复，必须走原生。
+
+退出编排（全部主线程，薄层异常 `runCatching` 吞掉不影响宿主）：
+
+```
+顶栏「退出登录」→ 确认对话框 → MgmtBridge.nativeLogout()
+  → Activity.runOnUiThread { Mgmt.logout(ctx) }   # 复用 P1 抽屉同一编排：
+  服务端拉黑(最佳努力) → 清 Keystore 凭证/matchCode → 断 WS/停 FGS → toast
+  → AccountSession Listener(登出) → Activity.reload()
+  → 前端启动同步读桥(未登录) → 清空 localStorage → 顶栏回游客态
+```
+
+安装失败提示体系（替代 P3 的长 toast，指引文案后端可运营热改）：
+
+- 非 2xx：解析统一信封，`DownloadException(bizCode = envelope.code（非 200）, msg)`；
+  网络层/无信封网关错误 `bizCode=null`，UI 仅记日志不改变形态；
+- 业务拒绝（7154 授权过期需续费 / 7158 席位已满需移除 / 7166 设备解绑需联系客服 /
+  7167 非授权设备改用 APP）→ `AlertDialog`（`setCancelable(false)`，必须显式确认）
+  展示后端完整指引句；`Log.w("MgmtMarket", …, err)` 留证；结果事件
+  `mgmt:install-result` 回派契约不变。
+
+构建/验证：
+
+- 2026-10-11 双 flavor 构建 `:app:assembleAppDebug :app:assembleInrtDebug`
+  **BUILD SUCCESSFUL**（Gradle 9.4.0 / JDK17 / 358 tasks，17m51s），
+  产物 `autojs6-*universal.apk`、`inrt-*universal.apk` 均重新生成；
+  构建后已 `git checkout -- version.properties`（自动改写的 BUILD 号不提交）；
+- 业务仓桌面端以 Cypress 注入模拟 `window.MgmtBridge` 实测三旅程通过：
+  桥令牌启动同步后 `/admin/market/orders` 鉴权接口 200、顶栏为已登录态；
+  360px 窄屏商店/收款/订单/论坛四页无横向滚动（实测中修复了门户顶栏与
+  商店筛选栏的窄屏溢出）；顶栏退出经 `nativeLogout` → reload 后 localStorage
+  清空并回到游客态。Cypress 为临时验证，spec 未入库；
+- **待补：设备侧运行冒烟**（无连接设备，账号弹窗购买→收银→失败指引对话框/
+  续费/席位移除的真机链路），按 §9 清单口径在下一轮真机执行。
+

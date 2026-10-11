@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.util.Log
 import android.view.ViewGroup
 import android.webkit.WebView
 import android.widget.FrameLayout
@@ -32,6 +33,10 @@ import org.json.JSONObject
  */
 class MarketActivity : AppCompatActivity() {
 
+    private companion object {
+        const val TAG = "MgmtMarket"
+    }
+
     private enum class Tab { SCRIPTS, FORUM }
 
     private lateinit var tabs: TabLayout
@@ -46,11 +51,13 @@ class MarketActivity : AppCompatActivity() {
 
     fun isInstallBusy(): Boolean = installInProgress
 
-    /** 原生登录成功后刷新当前页 (登录在 WebView 外完成, 见 MarketWebViewClient 收口)。 */
-    private val accountListener = AccountSession.Listener { loggedIn ->
-        if (loggedIn) {
-            webView?.post { runCatching { webView?.reload() } }
-        }
+    /**
+     * 原生账号状态变化后刷新当前页 (登录/退出都在 WebView 外完成, 见 MarketWebViewClient 收口):
+     * reload 使门户启动同步重新对齐 localStorage 会话 —— 登录后拿到 JWT, 退出后清空,
+     * 避免顶栏/页面停留在旧账号态。
+     */
+    private val accountListener = AccountSession.Listener {
+        webView?.post { runCatching { webView?.reload() } }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -137,6 +144,15 @@ class MarketActivity : AppCompatActivity() {
         runOnUiThread { runCatching { Mgmt.openRegister(applicationContext) } }
     }
 
+    /**
+     * P5 桥入口: 门户顶栏「退出登录」。复用抽屉同一编排
+     * (服务端拉黑最佳努力 → 清 Keystore 凭证/matchCode → 断 WS/停 FGS → toast)，
+     * 完成后 [accountListener] 触发 reload，门户回到游客态。
+     */
+    fun nativeLogout() {
+        runOnUiThread { runCatching { Mgmt.logout(applicationContext) } }
+    }
+
     fun openExternally(uri: Uri) {
         runCatching {
             startActivity(Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
@@ -188,11 +204,31 @@ class MarketActivity : AppCompatActivity() {
                                 is MarketProjectLayout.InvalidPackageException -> msg
                                 else -> "${getString(R.string.mgmt_market_install_failed_generic)}: $msg"
                             }
-                            ViewUtils.showToast(this, friendly, true)
+                            // P5: 失败常含完整行动指引 (7154 续费 / 7158 移除席位 /
+                            // 7166 联系客服解绑 / 7167 改用 APP), toast 时长不足以读完, 用对话框。
+                            val bizCode = (err as? MarketApiClient.DownloadException)?.bizCode
+                            Log.w(TAG, "market install failed: bizCode=$bizCode", err)
+                            showInstallFailureDialog(friendly)
                             dispatchInstallResult(false, friendly)
                         }
                 }
             }
+        }
+    }
+
+    /**
+     * 下载/安装失败指引对话框 (P5): 文案为后端中文指引或本地校验原因,
+     * 不可点外部取消, 必须显式确认, 避免长指引在 toast 中一闪而过。
+     * 对话框自身异常 (窗口泄漏等) 吞掉, 不影响结果事件回派。
+     */
+    private fun showInstallFailureDialog(message: String) {
+        runCatching {
+            androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle(R.string.mgmt_market_failed_title)
+                .setMessage(message)
+                .setCancelable(false)
+                .setPositiveButton(R.string.mgmt_market_failed_confirm, null)
+                .show()
         }
     }
 

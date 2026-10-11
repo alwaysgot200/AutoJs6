@@ -60,6 +60,9 @@ object AccountSession {
 
     fun accessToken(): String? = accessToken
 
+    /** 当前会话 refresh token（供市场 WebView 桥同步，与基座浏览器端存储形态一致）。 */
+    fun refreshToken(): String? = refreshToken
+
     fun addListener(listener: Listener) {
         synchronized(listeners) {
             if (!listeners.contains(listener)) listeners.add(listener)

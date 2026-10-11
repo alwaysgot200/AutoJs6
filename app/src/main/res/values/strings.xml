@@ -238,6 +238,9 @@
     <string name="mgmt_market_storage_required">All-files access is required to install scripts. Grant it and tap Install again.</string>
     <string name="mgmt_market_busy">Another package is being installed, please wait…</string>
     <string name="mgmt_market_bad_args">Invalid install request</string>
+    <!-- @mgmt-hook H8: P5 安装失败指引对话框 (标题/确认按钮; 正文为后端 71xx 中文指引或本地校验原因)。 -->
+    <string name="mgmt_market_failed_title">Installation failed</string>
+    <string name="mgmt_market_failed_confirm">Got it</string>
     <!-- @mgmt-hook H8: 连接状态常驻通知 (安静窗口内只展示 default, 不打扰)。 -->
     <string name="mgmt_notif_title">AutoJs6 Management Service</string>
     <string name="mgmt_notif_default">Keeping connection to the management platform</string>

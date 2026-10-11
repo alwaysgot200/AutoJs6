@@ -38,7 +38,13 @@ internal object MarketApiClient {
         val declaredHash: String,
     )
 
-    class DownloadException(message: String) : Exception(message)
+    /**
+     * @param bizCode 后端统一信封业务码 (如 7154/7158/7166/7167); 网络层失败/HTTP 非 2xx
+     *        且无信封时为 null, 供 UI 决定提示形态与日志定位
+     */
+    class DownloadException(val bizCode: Int?, message: String) : Exception(message) {
+        constructor(message: String) : this(null, message)
+    }
 
     private val client: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
@@ -71,9 +77,15 @@ internal object MarketApiClient {
         response.use { resp ->
             val body = resp.body
             if (!resp.isSuccessful || body == null) {
-                val raw = runCatching { resp.body?.string() }.getOrNull()
-                val bizMsg = MgmtApiHttp.parseEnvelope(raw)?.msg
-                throw DownloadException(bizMsg ?: "服务暂不可用 (HTTP ${resp.code})")
+                val raw = runCatching { body?.string() }.getOrNull()
+                val envelope = MgmtApiHttp.parseEnvelope(raw)
+                val bizMsg = envelope?.msg
+                // 业务拒绝 (7154/7158/7166/7167 等) 携带码值, UI 以指引对话框展示;
+                // 无信封的网关/HTTP 错误 bizCode=null。
+                throw DownloadException(
+                    envelope?.code?.takeIf { it != 200 },
+                    bizMsg ?: "服务暂不可用 (HTTP ${resp.code})",
+                )
             }
 
             val headers = resp.headers
