@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- @mgmt-hook H8: Management thin layer (mgmt-only resource file, add-only): market PLUGIN (APK) install flow. -->
+    <string name="mgmt_market_plugin_download_started">Downloading plugin package…</string>
+    <string name="mgmt_market_plugin_ready">Plugin package is ready. Please confirm installation in the system dialog.</string>
+</resources>

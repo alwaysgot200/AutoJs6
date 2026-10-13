@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- @mgmt-hook H8: 管理薄层自有资源文件(只增不覆盖官方同名资源): 市场插件包(APK)安装流程。 -->
+    <string name="mgmt_market_plugin_download_started">正在下载插件安装包…</string>
+    <string name="mgmt_market_plugin_ready">插件安装包已就绪，请在系统弹窗中确认安装</string>
+</resources>

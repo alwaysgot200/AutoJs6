@@ -1,8 +1,13 @@
 package org.autojs.autojs.mgmt.ui.market
 
+import android.content.ActivityNotFoundException
+import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
+import android.util.Log
+import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
+import android.webkit.WebChromeClient.FileChooserParams
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -53,5 +58,64 @@ internal class MarketWebViewClient(private val activity: MarketActivity) : WebVi
     }
 }
 
-/** 默认 Chrome 客户端占位: P3 无自定义需求, 预留文件选择/全屏视频扩展位, 不在 Activity 内联。 */
-internal class MarketWebChromeClient : WebChromeClient()
+/**
+ * 市场 Chrome 客户端 (mgmt 自有文件):
+ *
+ * 实现 H5 `<input type="file">` 文件选择 —— 论坛附件上传、脚本/工程包发布上传都依赖此能力。
+ * 默认空 WebChromeClient 在 Android WebView 上点击文件控件会静默无反应。
+ * 选择器经 [MarketActivity] 的 ActivityResultLauncher 拉起, 结果 uri 数组回传给 WebView;
+ * content:// uri 的临时读权限授予本应用 uid, Chromium 网络栈（同进程）可直接读取上传。
+ */
+internal class MarketWebChromeClient(private val activity: MarketActivity) : WebChromeClient() {
+
+    private companion object {
+        const val TAG = "MgmtMarket"
+    }
+
+    private var filePathCallback: ValueCallback<Array<Uri>>? = null
+
+    /**
+     * ActivityResult 回调: 选择成功/取消都必须回调 WebView,
+     * 取消（resultCode != OK 或 data 为 null）时 [FileChooserParams.parseResult] 返回 null,
+     * 以 null 回调才能释放上传通道, 否则后续点击文件控件永久无响应。
+     */
+    fun onFileChooserResult(resultCode: Int, data: Intent?) {
+        val callback = filePathCallback ?: return
+        filePathCallback = null
+        callback.onReceiveValue(FileChooserParams.parseResult(resultCode, data))
+    }
+
+    /** Activity 销毁时释放仍在等待的回调, 避免 WebView 悬挂。 */
+    fun abortPending() {
+        filePathCallback?.onReceiveValue(null)
+        filePathCallback = null
+    }
+
+    override fun onShowFileChooser(
+        webView: WebView?,
+        callback: ValueCallback<Array<Uri>>,
+        params: FileChooserParams,
+    ): Boolean {
+        // 上一次选择尚未结束又触发（重复点击/异常）时先释放旧回调
+        filePathCallback?.onReceiveValue(null)
+        filePathCallback = callback
+
+        return try {
+            val contentIntent = params.createIntent()
+            // accept=".auto" 等扩展名在部分文件管理器中可能过滤为空, 附 */* 兜底入口保证可选文件
+            val fallbackIntent = Intent(Intent.ACTION_GET_CONTENT)
+                .addCategory(Intent.CATEGORY_OPENABLE)
+                .setType("*/*")
+            val chooserIntent = Intent.createChooser(contentIntent, null).apply {
+                putExtra(Intent.EXTRA_INITIAL_INTENTS, arrayOf(fallbackIntent))
+            }
+            activity.launchFileChooser(chooserIntent)
+            true
+        } catch (e: ActivityNotFoundException) {
+            Log.w(TAG, "no activity to handle web file chooser", e)
+            filePathCallback = null
+            callback.onReceiveValue(null)
+            false
+        }
+    }
+}

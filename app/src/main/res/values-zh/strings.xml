@@ -1484,8 +1484,8 @@
     <string name="mgmt_env_name_development">开发环境</string>
     <string name="mgmt_text_env_indicator">%1$s · %2$s</string>
     <!-- @mgmt-hook H8: P3 脚本市场容器 (抽屉入口/双 tab/WebView 桥/下载安装)。 -->
-    <string name="mgmt_action_market">脚本市场</string>
-    <string name="mgmt_market_tab_scripts">脚本市场</string>
+    <string name="mgmt_action_market">应用市场</string>
+    <string name="mgmt_market_tab_scripts">应用市场</string>
     <string name="mgmt_market_tab_forum">技术论坛</string>
     <string name="mgmt_market_download_started">正在下载脚本安装包…</string>
     <string name="mgmt_market_install_success">已安装到 脚本/%1$s</string>

@@ -8,15 +8,22 @@ import android.util.Log
 import android.view.ViewGroup
 import android.webkit.WebView
 import android.widget.FrameLayout
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import com.google.android.material.tabs.TabLayout
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
+import org.autojs.autojs.core.plugin.center.PluginInstaller
 import org.autojs.autojs.mgmt.Mgmt
 import org.autojs.autojs.mgmt.auth.AccountSession
 import org.autojs.autojs.mgmt.client.MgmtApiHttp
 import org.autojs.autojs.mgmt.client.MarketApiClient
 import org.autojs.autojs.mgmt.config.MgmtServerConfig
-import org.autojs.autojs.mgmt.script.MarketScriptInstaller
 import org.autojs.autojs.mgmt.script.MarketProjectLayout
+import org.autojs.autojs.mgmt.script.MarketScriptInstaller
 import org.autojs.autojs.permission.AllFilesAccessPermission
 import org.autojs.autojs.util.ViewUtils
 import org.autojs.autojs6.R
@@ -45,9 +52,23 @@ class MarketActivity : AppCompatActivity() {
     private var currentTab: Tab = Tab.SCRIPTS
     private var tabSwitchEnabled = false
 
+    // H5 <input type="file"> 选择器：launcher 必须在 Activity STARTED 前注册，故随字段初始化。
+    private val marketChromeClient = MarketWebChromeClient(this)
+    private val fileChooserLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        marketChromeClient.onFileChooserResult(result.resultCode, result.data)
+    }
+
     /** 同一时刻只允许一个安装任务 (binder 线程读, 主线程写)。 */
     @Volatile
     private var installInProgress = false
+
+    /**
+     * PLUGIN 安装协程作用域 (主线程): 调官方 [PluginInstaller] 弹 APK 信息确认并拉起系统安装器;
+     * 与 Activity 生命周期绑定, onDestroy 取消。
+     */
+    private val pluginInstallScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     fun isInstallBusy(): Boolean = installInProgress
 
@@ -108,7 +129,7 @@ class MarketActivity : AppCompatActivity() {
                 userAgentString = "$userAgentString MgmtMarket/1.0"
             }
             webViewClient = MarketWebViewClient(this@MarketActivity)
-            webChromeClient = MarketWebChromeClient()
+            webChromeClient = marketChromeClient
             // 必须在首次 loadUrl 前注入; 门户页据此切换「免费下载/立即安装」按钮。
             addJavascriptInterface(MarketWebBridge(this@MarketActivity), "MgmtBridge")
         }
@@ -159,61 +180,122 @@ class MarketActivity : AppCompatActivity() {
         }
     }
 
+    /** 供 MarketWebChromeClient 拉起系统文件选择器（发帖附件 / 发布脚本包上传）。 */
+    fun launchFileChooser(intent: Intent) {
+        fileChooserLauncher.launch(intent)
+    }
+
     /**
-     * 桥入口 (binder 线程): 解析 `{scriptId}` → 忙等/权限门禁 → 后台下载+安装 → 回派结果事件。
+     * 桥入口 (binder 线程): 解析 `{scriptId, licenseMode?, packageType?}` →
+     * 忙等/权限门禁 → 后台下载 → SINGLE/PROJECT 原子解压安装、PLUGIN 主线程拉起系统安装器 → 回派结果事件。
+     *
+     * packageType 缺省按脚本包处理 (旧版门户行为不变); PLUGIN 不需要 AllFilesAccess 权限
+     * (APK 不写脚本工作目录), 故跳过该门禁。
      */
     fun requestInstall(payload: String?) {
-        val scriptId = runCatching {
-            JSONObject(payload.orEmpty()).getInt("scriptId")
+        val parsed = runCatching {
+            val obj = JSONObject(payload.orEmpty())
+            val id = obj.getInt("scriptId").takeIf { it > 0 } ?: return@runCatching null
+            val pkgType = obj.optString("packageType").trim().uppercase()
+            id to pkgType
         }.getOrNull()
-        if (scriptId == null || scriptId <= 0) {
+        if (parsed == null) {
             dispatchInstallResult(false, getString(R.string.mgmt_market_bad_args))
             return
         }
+        val (scriptId, payloadPackageType) = parsed
+        val isPlugin = payloadPackageType == "PLUGIN"
         runOnUiThread {
             if (installInProgress) {
                 dispatchInstallResult(false, getString(R.string.mgmt_market_busy))
                 return@runOnUiThread
             }
-            // MANAGE_EXTERNAL_STORAGE: 写脚本工作目录必需; 未授权时引导去设置, 不静默失败。
-            if (!AllFilesAccessPermission(this).has()) {
+            // MANAGE_EXTERNAL_STORAGE: 写脚本工作目录必需; PLUGIN 走系统安装器, 无需此权限。
+            if (!isPlugin && !AllFilesAccessPermission(this).has()) {
                 runCatching { AllFilesAccessPermission(this).request() }
                 dispatchInstallResult(false, getString(R.string.mgmt_market_storage_required))
                 return@runOnUiThread
             }
             installInProgress = true
-            ViewUtils.showToast(this, R.string.mgmt_market_download_started)
+            ViewUtils.showToast(
+                this,
+                if (isPlugin) R.string.mgmt_market_plugin_download_started else R.string.mgmt_market_download_started,
+            )
             MgmtApiHttp.executor.execute {
-                val result = runCatching {
-                    val pkg = MarketApiClient.downloadBlocking(applicationContext, scriptId)
-                    MarketScriptInstaller.installBlocking(pkg)
-                }
-                MgmtApiHttp.mainHandler.post {
-                    installInProgress = false
-                    result
-                        .onSuccess { info ->
-                            val msg = getString(R.string.mgmt_market_install_success, info.relativePath)
-                            ViewUtils.showToast(this, msg)
-                            dispatchInstallResult(true, msg)
-                        }
-                        .onFailure { err ->
-                            val msg = err.message?.takeIf { it.isNotEmpty() }
-                                ?: getString(R.string.mgmt_market_install_failed_generic)
-                            val friendly = when (err) {
-                                is MarketApiClient.DownloadException,
-                                is MarketProjectLayout.InvalidPackageException -> msg
-                                else -> "${getString(R.string.mgmt_market_install_failed_generic)}: $msg"
+                runCatching { MarketApiClient.downloadBlocking(applicationContext, scriptId) }
+                    .onSuccess { pkg ->
+                        if (pkg.packageType == "PLUGIN") {
+                            // 系统 PackageInstaller 必须在主线程经协程调起, 下载线程不得碰 UI。
+                            MgmtApiHttp.mainHandler.post { installPluginOnMain(pkg) }
+                        } else {
+                            val installed = runCatching { MarketScriptInstaller.installBlocking(pkg) }
+                            MgmtApiHttp.mainHandler.post {
+                                installInProgress = false
+                                installed
+                                    .onSuccess { info ->
+                                        val msg = getString(R.string.mgmt_market_install_success, info.relativePath)
+                                        ViewUtils.showToast(this, msg)
+                                        dispatchInstallResult(true, msg)
+                                    }
+                                    .onFailure { err -> handleInstallFailure(err) }
                             }
-                            // P5: 失败常含完整行动指引 (7154 续费 / 7158 移除席位 /
-                            // 7166 联系客服解绑 / 7167 改用 APP), toast 时长不足以读完, 用对话框。
-                            val bizCode = (err as? MarketApiClient.DownloadException)?.bizCode
-                            Log.w(TAG, "market install failed: bizCode=$bizCode", err)
-                            showInstallFailureDialog(friendly)
-                            dispatchInstallResult(false, friendly)
                         }
-                }
+                    }
+                    .onFailure { err -> MgmtApiHttp.mainHandler.post { handleInstallFailure(err) } }
             }
         }
+    }
+
+    /**
+     * PLUGIN 主线程安装 (官方 [PluginInstaller]):
+     * 先经官方 APK 信息确认弹窗, 用户确认后拉起系统 PackageInstaller。
+     * 官方入口在弹窗成功展示/异常时即返回 (系统安装最终结果应用内不可知),
+     * 故「已拉起」按成功回派; 官方自身已对异常弹失败对话框, 此处不重复弹窗。
+     * 临时 APK 保留在 cacheDir/plugin_dl/ (系统安装器需持续读取, 交系统缓存清理)。
+     */
+    private fun installPluginOnMain(pkg: MarketApiClient.PackageFile) {
+        pluginInstallScope.launch {
+            val uri = runCatching { MarketScriptInstaller.preparePluginUri(this@MarketActivity, pkg) }
+                .getOrElse { err ->
+                    installInProgress = false
+                    handleInstallFailure(err)
+                    return@launch
+                }
+            val result = PluginInstaller.installFromFileUriWithPrompt(this@MarketActivity, uri)
+            installInProgress = false
+            result
+                .onSuccess {
+                    val msg = getString(R.string.mgmt_market_plugin_ready)
+                    ViewUtils.showToast(this@MarketActivity, msg)
+                    dispatchInstallResult(true, msg)
+                }
+                .onFailure { err ->
+                    Log.w(TAG, "plugin install failed", err)
+                    dispatchInstallResult(
+                        false,
+                        err.message?.takeIf { it.isNotEmpty() }
+                            ?: getString(R.string.mgmt_market_install_failed_generic),
+                    )
+                }
+        }
+    }
+
+    /** 下载/校验/安装失败统一收口: 长指引对话框 + 回派 false 事件 (主线程调用)。 */
+    private fun handleInstallFailure(err: Throwable) {
+        installInProgress = false
+        val msg = err.message?.takeIf { it.isNotEmpty() }
+            ?: getString(R.string.mgmt_market_install_failed_generic)
+        val friendly = when (err) {
+            is MarketApiClient.DownloadException,
+            is MarketProjectLayout.InvalidPackageException -> msg
+            else -> "${getString(R.string.mgmt_market_install_failed_generic)}: $msg"
+        }
+        // P5: 失败常含完整行动指引 (7154 续费 / 7158 移除席位 /
+        // 7166 联系客服解绑 / 7167 改用 APP), toast 时长不足以读完, 用对话框。
+        val bizCode = (err as? MarketApiClient.DownloadException)?.bizCode
+        Log.w(TAG, "market install failed: bizCode=$bizCode", err)
+        showInstallFailureDialog(friendly)
+        dispatchInstallResult(false, friendly)
     }
 
     /**
@@ -264,6 +346,8 @@ class MarketActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         AccountSession.removeListener(accountListener)
+        marketChromeClient.abortPending()
+        pluginInstallScope.cancel()
         runCatching {
             webView?.let { view ->
                 (view.parent as? ViewGroup)?.removeView(view)

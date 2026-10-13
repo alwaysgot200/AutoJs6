@@ -1,5 +1,8 @@
 package org.autojs.autojs.mgmt.script
 
+import android.content.Context
+import android.net.Uri
+import androidx.core.content.FileProvider
 import org.autojs.autojs.mgmt.client.MarketApiClient
 import org.autojs.autojs.project.ProjectConfig
 import org.autojs.autojs.util.WorkingDirectoryUtils
@@ -46,6 +49,9 @@ internal object MarketScriptInstaller {
             val result = when (pkg.packageType) {
                 "SINGLE" -> installSingle(root, slug, pkg)
                 "PROJECT" -> installProject(root, slug, pkg)
+                // PLUGIN 不允许走本阻塞通道: 必须由 Activity 在主线程经 preparePluginUri
+                // + 官方 PluginInstaller 拉起系统安装器 (见 MarketActivity)。
+                "PLUGIN" -> throw MarketProjectLayout.InvalidPackageException("插件包必须经系统安装器安装")
                 else -> throw MarketProjectLayout.InvalidPackageException("未知包型: ${pkg.packageType}")
             }
             // 安装成功后删除下载临时包。
@@ -56,6 +62,29 @@ internal object MarketScriptInstaller {
             throw e
         }
     }
+
+    // region PLUGIN
+
+    /**
+     * 准备 PLUGIN 安装 URI (主线程调用):
+     * - 不解压、不写脚本工作目录, 下载产物保留在 cacheDir/plugin_dl/ (系统安装器需持续读取);
+     * - FileProvider authority 与官方 PluginInstaller 一致 (`${packageName}.fileprovider`),
+     *   官方 provider_paths.xml 的 root-path 已覆盖 cache 目录。
+     *
+     * 调用方随后在主线程协程内调官方
+     * `PluginInstaller.installFromFileUriWithPrompt(context, uri)`。
+     */
+    fun preparePluginUri(context: Context, pkg: MarketApiClient.PackageFile): Uri {
+        if (pkg.packageType != "PLUGIN") {
+            throw MarketProjectLayout.InvalidPackageException("非插件包型, 无法拉起 APK 安装")
+        }
+        if (!pkg.file.isFile || pkg.file.length() <= 0) {
+            throw MarketProjectLayout.InvalidPackageException("插件安装包不存在或已损坏")
+        }
+        return FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", pkg.file)
+    }
+
+    // endregion
 
     // region SINGLE
 

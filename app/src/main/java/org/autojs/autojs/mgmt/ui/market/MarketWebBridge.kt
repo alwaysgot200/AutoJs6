@@ -8,7 +8,8 @@ import org.autojs.autojs.mgmt.config.MgmtServerConfig
  * 门户页 ↔ 原生桥 (方案 §10.1 MarketWebBridge, 注入名 `window.MgmtBridge`)。
  *
  * 仅暴露最小能力面; 全部方法经 [MarketActivity] 在主线程编排, 下载/安装在后台线程:
- * - [downloadAndInstall] 业务动作: 入参 JSON `{scriptId, licenseMode?}`;
+ * - [downloadAndInstall] 业务动作: 入参 JSON `{scriptId, licenseMode?, packageType?}`
+ *   (packageType=PLUGIN 时下载 APK 并经官方 PluginInstaller 拉起系统安装器; 缺省按脚本/工程包处理);
  * - [getToken] / [getRefreshToken] / [getServerBase] 门户启动同步会话/识别环境 (P5);
  * - [openLogin] / [openRegister] 未登录互动的原生收口 (注册只走系统浏览器);
  * - [nativeLogout] 门户退出登录的原生收口 (P5, 清凭证+断 WS 后由 Activity reload)。

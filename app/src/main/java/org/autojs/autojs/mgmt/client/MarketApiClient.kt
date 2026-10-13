@@ -98,14 +98,25 @@ internal object MarketApiClient {
             val versionCode = headers["x-version-code"]?.toIntOrNull() ?: 0
             val headerScriptId = headers["x-script-id"]?.toIntOrNull() ?: scriptId
 
-            if (declaredHash.length != 64 || packageType !in setOf("SINGLE", "PROJECT") ||
+            if (declaredHash.length != 64 || packageType !in setOf("SINGLE", "PROJECT", "PLUGIN") ||
                 entryFile.isEmpty() || installSlug.isEmpty()
             ) {
                 throw DownloadException("下载响应缺少版本元数据, 请稍后重试")
             }
 
-            val dir = File(context.cacheDir, "mgmt-market").apply { runCatching { mkdirs() } }
-            val temp = File(dir, "dl-$scriptId-${System.nanoTime()}.zip")
+            // PLUGIN 落官方插件安装同一目录 cacheDir/plugin_dl/ (FileProvider root-path 已覆盖),
+            // 且必须以 .apk 结尾供系统安装器识别; SINGLE/PROJECT 仍落 mgmt-market/*.zip。
+            val isPlugin = packageType == "PLUGIN"
+            val dir = if (isPlugin) {
+                File(context.cacheDir, "plugin_dl")
+            } else {
+                File(context.cacheDir, "mgmt-market")
+            }.apply { runCatching { mkdirs() } }
+            val temp = if (isPlugin) {
+                File(dir, pluginApkName(entryFile, headerScriptId))
+            } else {
+                File(dir, "dl-$scriptId-${System.nanoTime()}.zip")
+            }
             try {
                 val digest = MessageDigest.getInstance("SHA-256")
                 var written = 0L
@@ -140,10 +151,24 @@ internal object MarketApiClient {
                     declaredHash = declaredHash,
                 )
             } catch (e: Exception) {
+                // PLUGIN 下载失败可安全删除半成品 (成功时不删: 系统安装器需持续读取该文件);
+                // SINGLE/PROJECT 维持原有失败即删临时 zip 的行为。
                 runCatching { temp.delete() }
                 if (e is DownloadException) throw e
                 throw DownloadException("下载中断: ${e.message ?: e.javaClass.simpleName}")
             }
         }
+    }
+
+    /**
+     * PLUGIN 落盘文件名防护: 只信任响应头 entryFile 的 basename, 且必须匹配
+     * `^[A-Za-z0-9._-]+\.apk$`、长度 ≤200; 任一不符回退 `market-<scriptId>.apk`
+     * (与服务端 sanitizePluginName 同口径, 防路径注入/非法字符)。
+     */
+    private val pluginApkNamePattern = Regex("^[A-Za-z0-9._-]+\\.apk$", RegexOption.IGNORE_CASE)
+
+    private fun pluginApkName(entryFile: String, scriptId: Int): String {
+        val base = entryFile.substringAfterLast('/').substringAfterLast('\\')
+        return if (base.length <= 200 && pluginApkNamePattern.matches(base)) base else "market-$scriptId.apk"
     }
 }
