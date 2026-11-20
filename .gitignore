@@ -45,3 +45,6 @@ desktop.ini
 
 **/assets-app/declarations/
 **/assets-app/sample/declarations/
+
+# 本地编辑器配置（含本机绝对路径，不入库）
+/.vscode/
