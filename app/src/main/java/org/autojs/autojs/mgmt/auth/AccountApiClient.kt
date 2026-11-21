@@ -18,7 +18,8 @@ import org.json.JSONObject
  * - POST /auth/login  租户账号密码登录, 返回 access_token / refresh_token;
  * - POST /auth/logout 令牌加入黑名单 (最佳努力, 失败不影响本地清理)。
  *
- * 设备端以 clientId=android 标识; 不加 isEncrypt 头, 服务端明文 JSON 校验
+ * 设备端以 clientId=autojs6 标识（产品角色门禁：autojs6 或 qunkong 任一即可登录）;
+ * 不加 isEncrypt 头, 服务端明文 JSON 校验
  * (与 AGENTS.md §13.1 浏览器冒烟同一通道)。
  */
 internal object AccountApiClient {
@@ -68,7 +69,7 @@ internal object AccountApiClient {
                     .put("password", password)
                     .put("code", code)
                     .put("uuid", uuid)
-                    .put("clientId", "android")
+                    .put("clientId", "autojs6")
                     .toString()
                 val request = Request.Builder()
                     .url(apiV1("/auth/login"))

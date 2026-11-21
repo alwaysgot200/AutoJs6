@@ -39,7 +39,7 @@ object MgmtServerConfig {
 
     /** 租户自助注册页 (仅允许系统浏览器打开, APP 内不加载/不实现注册表单)。 */
     @JvmStatic
-    fun registerPageUrl(): String = "${serverBaseUrl()}/admin/register"
+    fun registerPageUrl(): String = "${serverBaseUrl()}/admin/login/register?productId=autojs6"
 
     /** 当前是否生产环境构建 (供 UI 展示环境标识, 业务逻辑禁止据此分叉)。 */
     @JvmStatic
