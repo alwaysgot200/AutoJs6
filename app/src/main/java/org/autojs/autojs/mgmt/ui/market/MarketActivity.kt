@@ -42,6 +42,13 @@ class MarketActivity : AppCompatActivity() {
 
     private companion object {
         const val TAG = "MgmtMarket"
+
+        /**
+         * 多产品市场/论坛（方案 §4.8）：手机端锁定本产品，原生侧每次 loadTab 都带
+         * `product=autojs6&source=client`，作为 SPA 内部路由丢失 query 时的兜底；
+         * `source=client` 让 Web 门户隐藏产品切换器。
+         */
+        const val PRODUCT_QUERY = "?product=autojs6&source=client"
     }
 
     private enum class Tab { SCRIPTS, FORUM }
@@ -140,7 +147,7 @@ class MarketActivity : AppCompatActivity() {
     private fun loadTab(tab: Tab) {
         currentTab = tab
         val path = if (tab == Tab.SCRIPTS) "/admin/market/shop" else "/admin/market/forum"
-        webView?.loadUrl(MgmtServerConfig.serverBaseUrl() + path)
+        webView?.loadUrl(MgmtServerConfig.serverBaseUrl() + path + PRODUCT_QUERY)
     }
 
     /** WebViewClient 页面切换回调: 同步 tab 高亮但不触发二次加载。 */
