@@ -3,4 +3,11 @@
     <!-- @mgmt-hook H8: 管理薄层自有资源文件(只增不覆盖官方同名资源): 市场插件包(APK)安装流程。 -->
     <string name="mgmt_market_plugin_download_started">正在下载插件安装包…</string>
     <string name="mgmt_market_plugin_ready">插件安装包已就绪，请在系统弹窗中确认安装</string>
+    <!-- @mgmt-hook H8: 管理薄层自有资源文件(只增不覆盖官方同名资源): 市场下载/校验错误文案(安装失败对话框展示)。 -->
+    <string name="mgmt_market_error_network">网络异常: %1$s</string>
+    <string name="mgmt_market_error_http">服务暂不可用 (HTTP %1$d)</string>
+    <string name="mgmt_market_error_missing_meta">下载响应缺少版本元数据, 请稍后重试</string>
+    <string name="mgmt_market_error_size_mismatch">安装包大小与服务端声明不一致, 已拒绝安装</string>
+    <string name="mgmt_market_error_hash_mismatch">安装包校验失败 (SHA-256 不一致), 已拒绝安装</string>
+    <string name="mgmt_market_error_interrupted">下载中断: %1$s</string>
 </resources>

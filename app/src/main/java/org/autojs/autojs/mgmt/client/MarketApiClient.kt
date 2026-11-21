@@ -5,6 +5,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.autojs.autojs.mgmt.auth.AccountSession
 import org.autojs.autojs.mgmt.core.DeviceFingerprint
+import org.autojs.autojs6.R
 import java.io.File
 import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
@@ -56,7 +57,8 @@ internal object MarketApiClient {
     /**
      * 阻塞下载 [scriptId] 的当前版本清洁包并完成校验。
      *
-     * @throws DownloadException 业务拒绝/网络失败/校验不符 (message 为可直接展示的中文文案)
+     * @throws DownloadException 业务拒绝/网络失败/校验不符 (message 可直接展示:
+     *        后端 71xx 指引原样上抛, 本地文案取自 strings 资源)
      */
     fun downloadBlocking(context: Context, scriptId: Int): PackageFile {
         val request = Request.Builder()
@@ -72,7 +74,11 @@ internal object MarketApiClient {
             .build()
 
         val response = runCatching { client.newCall(request).execute() }
-            .getOrElse { throw DownloadException("网络异常: ${it.message ?: it.javaClass.simpleName}") }
+            .getOrElse {
+                throw DownloadException(
+                    context.getString(R.string.mgmt_market_error_network, it.message ?: it.javaClass.simpleName),
+                )
+            }
 
         response.use { resp ->
             val body = resp.body
@@ -84,7 +90,7 @@ internal object MarketApiClient {
                 // 无信封的网关/HTTP 错误 bizCode=null。
                 throw DownloadException(
                     envelope?.code?.takeIf { it != 200 },
-                    bizMsg ?: "服务暂不可用 (HTTP ${resp.code})",
+                    bizMsg ?: context.getString(R.string.mgmt_market_error_http, resp.code),
                 )
             }
 
@@ -101,7 +107,7 @@ internal object MarketApiClient {
             if (declaredHash.length != 64 || packageType !in setOf("SINGLE", "PROJECT", "PLUGIN") ||
                 entryFile.isEmpty() || installSlug.isEmpty()
             ) {
-                throw DownloadException("下载响应缺少版本元数据, 请稍后重试")
+                throw DownloadException(context.getString(R.string.mgmt_market_error_missing_meta))
             }
 
             // PLUGIN 落官方插件安装同一目录 cacheDir/plugin_dl/ (FileProvider root-path 已覆盖),
@@ -134,10 +140,10 @@ internal object MarketApiClient {
                 }
                 val actualHash = digest.digest().joinToString("") { "%02x".format(it) }
                 if (declaredSize >= 0 && written != declaredSize) {
-                    throw DownloadException("安装包大小与服务端声明不一致, 已拒绝安装")
+                    throw DownloadException(context.getString(R.string.mgmt_market_error_size_mismatch))
                 }
                 if (!MessageDigest.isEqual(actualHash.toByteArray(), declaredHash.toByteArray())) {
-                    throw DownloadException("安装包校验失败 (SHA-256 不一致), 已拒绝安装")
+                    throw DownloadException(context.getString(R.string.mgmt_market_error_hash_mismatch))
                 }
                 return PackageFile(
                     file = temp,
@@ -155,7 +161,9 @@ internal object MarketApiClient {
                 // SINGLE/PROJECT 维持原有失败即删临时 zip 的行为。
                 runCatching { temp.delete() }
                 if (e is DownloadException) throw e
-                throw DownloadException("下载中断: ${e.message ?: e.javaClass.simpleName}")
+                throw DownloadException(
+                    context.getString(R.string.mgmt_market_error_interrupted, e.message ?: e.javaClass.simpleName),
+                )
             }
         }
     }

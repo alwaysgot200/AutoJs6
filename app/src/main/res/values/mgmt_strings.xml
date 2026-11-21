@@ -3,4 +3,11 @@
     <!-- @mgmt-hook H8: Management thin layer (mgmt-only resource file, add-only): market PLUGIN (APK) install flow. -->
     <string name="mgmt_market_plugin_download_started">Downloading plugin package…</string>
     <string name="mgmt_market_plugin_ready">Plugin package is ready. Please confirm installation in the system dialog.</string>
+    <!-- @mgmt-hook H8: Management thin layer (mgmt-only resource file, add-only): market download/verify error messages (shown in the install-failure dialog). -->
+    <string name="mgmt_market_error_network">Network error: %1$s</string>
+    <string name="mgmt_market_error_http">Service temporarily unavailable (HTTP %1$d)</string>
+    <string name="mgmt_market_error_missing_meta">Download response is missing package metadata, please try again later</string>
+    <string name="mgmt_market_error_size_mismatch">Package size does not match the server declaration, installation rejected</string>
+    <string name="mgmt_market_error_hash_mismatch">Package verification failed (SHA-256 mismatch), installation rejected</string>
+    <string name="mgmt_market_error_interrupted">Download interrupted: %1$s</string>
 </resources>
