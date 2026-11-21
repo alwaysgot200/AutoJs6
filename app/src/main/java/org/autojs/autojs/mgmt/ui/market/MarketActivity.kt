@@ -21,6 +21,7 @@ import org.autojs.autojs.mgmt.Mgmt
 import org.autojs.autojs.mgmt.auth.AccountSession
 import org.autojs.autojs.mgmt.client.MgmtApiHttp
 import org.autojs.autojs.mgmt.client.MarketApiClient
+import org.autojs.autojs.mgmt.client.MarketLibrarySync
 import org.autojs.autojs.mgmt.config.MgmtServerConfig
 import org.autojs.autojs.mgmt.script.MarketProjectLayout
 import org.autojs.autojs.mgmt.script.MarketScriptInstaller
@@ -91,6 +92,10 @@ class MarketActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.mgmt_activity_market)
+
+        // 打开市场时补一次「我的库」同步：应用启动时工作目录可能尚未就绪，
+        // 失败不记 token，这里可重试（已同步则内部直接跳过）。
+        runCatching { MarketLibrarySync.requestSync() }
 
         tabs = findViewById(R.id.mgmt_market_tabs)
         webContainer = findViewById(R.id.mgmt_market_container)

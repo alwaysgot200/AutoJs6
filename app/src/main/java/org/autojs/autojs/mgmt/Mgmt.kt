@@ -12,6 +12,7 @@ import org.autojs.autojs.engine.ScriptEngineService
 import org.autojs.autojs.mgmt.auth.AccountSession
 import org.autojs.autojs.mgmt.client.AccessCodeClient
 import org.autojs.autojs.mgmt.client.ManagementPlatformClient
+import org.autojs.autojs.mgmt.client.MarketLibrarySync
 import org.autojs.autojs.mgmt.client.NetworkReachabilityMonitor
 import org.autojs.autojs.mgmt.config.MgmtServerConfig
 import org.autojs.autojs.mgmt.perm.MgmtPermissionRequester
@@ -55,6 +56,9 @@ object Mgmt {
     fun bootstrap(application: Application) {
         // 先恢复账号会话 (Keystore 解密 JWT), 后续 FGS 建连门禁依赖登录态。
         AccountSession.restore()
+        // 登录后同步「我的库」(市场下载内容恢复; 论坛附件不入库)。
+        runCatching { MarketLibrarySync.bootstrap(application) }
+            .onFailure { Log.w("Mgmt", "library sync bootstrap failed", it) }
         MgmtPermissionRequester.register(application)
         // 本机网络恢复即时重连 (回调内部自行吞异常, 绝不拖垮宿主启动流程)。
         runCatching {
