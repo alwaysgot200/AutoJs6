@@ -41,7 +41,7 @@
 
 - JDK 17–25（CI 用 21，本机实测 JDK 17）；Android SDK + NDK + CMake 3.22.1，
   路径写入 **不入库** 的 `local.properties`（`sdk.dir`/`cmake.dir`）。
-- Gradle 用 wrapper（9.4.0），**禁止**直接用系统 gradle；AGP/Kotlin 版本由
+- Gradle 用 wrapper（9.6.1），**禁止**直接用系统 gradle；AGP/Kotlin 版本由
   `settings.gradle.kts` 依 `.utils/` 元数据按 Gradle 版本自动解析，仅可通过
   `version.properties` 的 `OVERRIDDEN_*` 键临时覆盖。
 - 首次配置需联网下载 OpenCV/ONNX/Paddle 等原生依赖（build-logic 的 LibDeployer）；
